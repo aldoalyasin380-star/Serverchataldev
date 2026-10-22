@@ -21,7 +21,6 @@ const SYSTEM_CONFIG = {
   mainGroupId: "global",
   mainGroupName: "Channel / Grup Utama Aldev",
   // PENGATURAN WARNA BADGE KHUSUS DEVELOPER (@aldev)
-  // Set salah satu ke true untuk mengaktifkan warna tersebut!
   devBadgeColor: {
     rainbow: true,  // Efek Warna Warni Bergerak (Neon Rainbow)
     red: false,      // Merah
@@ -31,7 +30,6 @@ const SYSTEM_CONFIG = {
   }
 };
 
-// Fungsi helper penentu warna badge developer
 function getDevBadgeColor() {
   const c = SYSTEM_CONFIG.devBadgeColor;
   if (c.rainbow) return 'rainbow';
@@ -114,6 +112,10 @@ app.post('/api/register', h(async (req, res) => {
 
   await redis.set('user:' + username, userData);
   await redis.sadd('users', username);
+
+  // Otomatis tambahkan user baru ke daftar chat global
+  await redis.sadd('uchats:' + username, 'global');
+
   res.json({ username });
 }));
 
@@ -208,14 +210,15 @@ app.get('/api/sync', auth, h(async (req, res) => {
 app.get('/api/chats', auth, h(async (req, res) => {
   const u = req.u;
   const ids = ['global', ...(await redis.smembers('uchats:' + u))];
-  const gids = ids.filter(i => i.startsWith('grp:'));
+  const uniqueIds = [...new Set(ids)];
+  const gids = uniqueIds.filter(i => i.startsWith('grp:'));
   const groups = gids.length ? await redis.mget(...gids.map(g => 'group:' + g.slice(4))) : [];
   const gm = {};
   gids.forEach((g, i) => (gm[g] = groups[i]));
   const p = redis.pipeline();
-  ids.forEach(i => { p.llen('c:' + i); p.lindex('c:' + i, -1); });
+  uniqueIds.forEach(i => { p.llen('c:' + i); p.lindex('c:' + i, -1); });
   const r = await p.exec();
-  const out = ids.map((id, i) => {
+  const out = uniqueIds.map((id, i) => {
     const count = r[i * 2], last = r[i * 2 + 1];
     if (id === 'global') return { id, type: 'global', title: SYSTEM_CONFIG.mainGroupName, count, last, verified: true };
     if (id.startsWith('dm:')) {
@@ -258,7 +261,7 @@ app.post('/api/send', auth, h(async (req, res) => {
   await redis.rpush('c:' + chat, msgObj);
   await Promise.all([
     redis.incr('msgs:' + req.u),
-    bump(chat, acc.members),
+    bump(chat, acc.members || []),
     ...(chat.startsWith('dm:') ? acc.members.map(m => redis.sadd('uchats:' + m, chat)) : []),
   ]);
   res.json({ ok: 1 });
@@ -282,7 +285,7 @@ app.post('/api/delete-message', auth, h(async (req, res) => {
   m.deleted = true;
   
   await redis.lset('c:' + chat, idx, m);
-  await bump(chat, acc.members);
+  await bump(chat, acc.members || []);
   res.json({ ok: 1 });
 }));
 
@@ -301,7 +304,7 @@ app.post('/api/react', auth, h(async (req, res) => {
   else { arr.push(u); await redis.incr('reacts:' + u); }
   if (arr.length) m.r[emoji] = arr; else delete m.r[emoji];
   await redis.lset('c:' + chat, idx, m);
-  await bump(chat, acc.members);
+  await bump(chat, acc.members || []);
   res.json({ ok: 1 });
 }));
 
@@ -317,12 +320,10 @@ app.get('/api/settings/ttl', auth, h(async (req, res) => {
   res.json({ ttl: parseInt(ttl, 10) });
 }));
 
-// Pembuatan Grup Baru (Secara Default Privat / Tidak Langsung Publik)
 app.post('/api/groups', auth, h(async (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 30);
   if (!name) return res.status(400).json({ error: 'Nama grup wajib diisi' });
   const id = crypto.randomBytes(4).toString('hex');
-  // Group otomatis private
   await redis.set('group:' + id, { id, name, owner: req.u, members: [req.u], isPrivate: true });
   await redis.sadd('uchats:' + req.u, 'grp:' + id);
   res.json({ id: 'grp:' + id });
