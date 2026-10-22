@@ -7,22 +7,18 @@ const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
 });
-const SECRET = process.env.APP_SECRET || 'ganti-secret-ini-di-env';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-const tokenOf = u => crypto.createHmac('sha256', SECRET).update(u).digest('hex').slice(0, 24);
 const clean = u => String(u || '').toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_.]/g, '').slice(0, 20);
 const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 const dmId = (a, b) => 'dm:' + [a, b].sort().join(':');
 const EMOJI = ['❤️', '😂', '👍', '😮', '🔥'];
 
-// --- CONFIG & PROTEKSI GRUP UTAMA ---
 const SYSTEM_CONFIG = {
-  mainGroupId: "global", // Grup utama pakai room 'global'
+  mainGroupId: "global",
   mainGroupName: "Channel / Grup Utama Aldev",
-  mainGroupLocked: true
 };
 
 const h = fn => (req, res) =>
@@ -33,7 +29,7 @@ const h = fn => (req, res) =>
 
 function auth(req, res, next) {
   const u = clean(req.get('x-user'));
-  if (!u || req.get('x-token') !== tokenOf(u)) return res.status(401).json({ error: 'Belum login' });
+  if (!u) return res.status(401).json({ error: 'Belum terdaftar' });
   req.u = u;
   next();
 }
@@ -55,6 +51,7 @@ async function access(u, chat) {
   }
   return { ok: false };
 }
+
 const bump = (chat, members) =>
   chat === 'global' ? redis.incr('ver:global') : Promise.all(members.map(m => redis.incr('ver:' + m)));
 
@@ -71,33 +68,37 @@ async function missions(u, me) {
   ].map(m => ({ ...m, n: Math.min(m.n, m.max) }));
 }
 
-// ---------- akun ----------
+// ---------- Pendaftaran Permanen & Cek Username Unik ----------
 app.post('/api/register', h(async (req, res) => {
   const username = clean(req.body.username);
   const name = String(req.body.name || '').trim().slice(0, 30);
   if (username.length < 3) return res.status(400).json({ error: 'Username minimal 3 karakter' });
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi' });
-  const isAldev = username === 'aldev';
-  const ok = await redis.setnx('user:' + username, { 
-    username, name, bio: '', av: 0, 
-    verified: isAldev ? true : false, // Otomatis centang biru jika username @aldev
-    created: Date.now() 
-  });
-  if (!ok) return res.status(409).json({ error: 'Username sudah dipakai' });
-  await redis.sadd('users', username);
-  res.json({ username, token: tokenOf(username) });
-}));
 
-app.post('/api/login', h(async (req, res) => {
-  const username = clean(req.body.username);
-  if (!username || req.body.token !== tokenOf(username)) return res.status(401).json({ error: 'Username atau kode salah' });
-  if (!(await redis.exists('user:' + username))) return res.status(401).json({ error: 'Akun tidak ditemukan' });
-  res.json({ username, token: tokenOf(username) });
+  // Cek apakah username sudah ada yang pakai
+  const exists = await redis.exists('user:' + username);
+  if (exists) {
+    return res.status(409).json({ error: 'Username sudah dipakai orang lain! Pilih yang lain.' });
+  }
+
+  const isAldev = username === 'aldev';
+  const userData = {
+    username,
+    name,
+    bio: '',
+    av: 0,
+    verified: isAldev ? true : false,
+    created: Date.now()
+  };
+
+  await redis.set('user:' + username, userData);
+  await redis.sadd('users', username);
+  res.json({ username });
 }));
 
 app.get('/api/me', auth, h(async (req, res) => {
   let me = await redis.get('user:' + req.u);
-  if (!me) return res.status(401).json({ error: 'Akun tidak ada' });
+  if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan di server' });
   if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
   await redis.sadd('days:' + req.u, today());
   res.json({ ...me, missions: await missions(req.u, me) });
@@ -105,11 +106,12 @@ app.get('/api/me', auth, h(async (req, res) => {
 
 app.post('/api/me', auth, h(async (req, res) => {
   const me = await redis.get('user:' + req.u);
+  if (!me) return res.status(404).json({ error: 'Akun tidak ada' });
   const name = String(req.body.name ?? me.name).trim().slice(0, 30);
   if (!name) return res.status(400).json({ error: 'Nama tidak boleh kosong' });
   me.name = name;
   me.bio = String(req.body.bio ?? me.bio).slice(0, 120);
-  if (req.u === 'aldev') me.verified = true; // Paksa tetap centang biru untuk @aldev
+  if (req.u === 'aldev') me.verified = true;
   const a = req.body.avatar;
   if (a === '') { await redis.del('av:' + req.u); me.av = 0; }
   else if (typeof a === 'string') {
@@ -157,7 +159,6 @@ app.get('/api/users', auth, h(async (req, res) => {
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
 }));
 
-// ---------- chat & auto-delete & settings ----------
 app.get('/api/sync', auth, h(async (req, res) => {
   const [a, b] = await redis.mget('ver:' + req.u, 'ver:global');
   res.json({ v: (a || 0) + '.' + (b || 0) });
@@ -191,15 +192,12 @@ app.get('/api/messages', auth, h(async (req, res) => {
   const chat = String(req.query.chat || '');
   if (!(await access(req.u, chat)).ok) return res.status(403).json({ error: 'Akses ditolak' });
   
-  // Ambil timer auto-delete per user/chat dari Redis (Default: 0 / Mati)
   const ttl = parseInt(await redis.get('setting:ttl:' + req.u + ':' + chat) || 0, 10);
   const now = Date.now();
-
   let msgs = await redis.lrange('c:' + chat, 0, -1);
   if (ttl > 0) {
     msgs = msgs.filter(m => (now - m.ts) < ttl * 1000);
   }
-
   const len = msgs.length;
   const start = Math.max(0, len - 100);
   res.json({ start, msgs: len ? msgs.slice(start) : [] });
@@ -208,7 +206,7 @@ app.get('/api/messages', auth, h(async (req, res) => {
 app.post('/api/send', auth, h(async (req, res) => {
   const chat = String(req.body.chat || '');
   const text = String(req.body.text || '').trim().slice(0, 2000);
-  const audio = req.body.audio || null; // Support Voice Note (Base64)
+  const audio = req.body.audio || null;
   if (!text && !audio) return res.status(400).json({ error: 'Pesan kosong' });
 
   const acc = await access(req.u, chat);
@@ -243,9 +241,8 @@ app.post('/api/react', auth, h(async (req, res) => {
   res.json({ ok: 1 });
 }));
 
-// Pengaturan Auto-Delete Timer & Update/Hapus Grup (Proteksi Grup Utama)
 app.post('/api/settings/ttl', auth, h(async (req, res) => {
-  const { chat, ttl } = req.body; // ttl dalam detik (0 = mati)
+  const { chat, ttl } = req.body;
   await redis.set('setting:ttl:' + req.u + ':' + chat, ttl || 0);
   res.json({ ok: 1 });
 }));
@@ -268,11 +265,11 @@ app.post('/api/groups', auth, h(async (req, res) => {
 app.post('/api/groups/update', auth, h(async (req, res) => {
   const { code, name, action } = req.body;
   if (code === SYSTEM_CONFIG.mainGroupId || code === 'global') {
-    return res.status(403).json({ error: 'Grup utama dikunci oleh config developer dan tidak bisa diubah/dihapus!' });
+    return res.status(403).json({ error: 'Grup utama dikunci dan tidak bisa diubah/dihapus!' });
   }
   const g = await redis.get('group:' + code);
   if (!g) return res.status(404).json({ error: 'Grup tidak ditemukan' });
-  if (g.owner !== req.u) return res.status(403).json({ error: 'Hanya pemilik grup yang bisa mengubah' });
+  if (g.owner !== req.u) return res.status(403).json({ error: 'Hanya pemilik grup' });
 
   if (action === 'delete') {
     await redis.del('group:' + code);
@@ -283,7 +280,7 @@ app.post('/api/groups/update', auth, h(async (req, res) => {
     await redis.set('group:' + code, g);
     await bump('grp:' + code, g.members);
   }
-  res.json({ ok: 1 }));
+  res.json({ ok: 1 });
 }));
 
 app.post('/api/groups/join', auth, h(async (req, res) => {
