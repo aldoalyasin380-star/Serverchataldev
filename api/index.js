@@ -26,8 +26,8 @@ const SYSTEM_CONFIG = {
   botName: "Aldev Guard Bot",
   botAvatar: "https://files.catbox.moe/jx4guq.jpg",
   devBadgeColor: {
-    rainbow: true,
-    red: false,
+    rainbow: false,
+    red: true,
     orange: false,
     yellow: false,
     blue: false
