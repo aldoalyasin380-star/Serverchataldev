@@ -25,8 +25,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .auth{min-height:100%;display:grid;place-items:center;padding:20px}
 .card{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px}
 .card h1{font-size:22px;margin-bottom:4px}.card p{color:var(--mu);font-size:13px;margin-bottom:16px}
-.tabs{display:flex;gap:6px;margin-bottom:14px}.tabs button{flex:1;padding:8px;border-radius:8px;color:var(--mu)}
-.tabs button.on{background:var(--bg);color:var(--tx)}
 .card label{display:block;font-size:12px;color:var(--mu);margin:10px 0 5px}
 .err{color:#ff6b6b;font-size:13px;min-height:18px;margin:10px 0 4px}
 /* app */
@@ -86,21 +84,17 @@ input:focus,textarea:focus{border-color:var(--ac)}
 </head>
 <body>
 
+<!-- Tampilan Pendaftaran Permanen (Tanpa Tombol Masuk/Login) -->
 <div id="auth" class="auth hidden">
   <div class="card">
     <h1>Ngobrol</h1>
-    <p>Chat tanpa email. Cukup nama dan username.</p>
-    <div class="tabs"><button id="tReg" class="on">Daftar</button><button id="tLog">Masuk</button></div>
-    <div id="fReg">
-      <label>Nama</label><input id="rName" maxlength="30" placeholder="Nama kamu">
-      <label>Username</label><input id="rUser" maxlength="20" placeholder="contoh: aldev" autocapitalize="none" autocomplete="off">
-    </div>
-    <div id="fLog" class="hidden">
-      <label>Username</label><input id="lUser" placeholder="username kamu" autocapitalize="none" autocomplete="off">
-      <label>Kode pemulihan</label><input id="lCode" placeholder="ada di Pengaturan HP lama" autocapitalize="none" autocomplete="off">
-    </div>
+    <p>Akun tersimpan permanen di perangkat ini. Cukup buat nama dan username unik.</p>
+    <label>Nama Lengkap / Panggilan</label>
+    <input id="rName" maxlength="30" placeholder="Nama kamu">
+    <label>Username (Unik)</label>
+    <input id="rUser" maxlength="20" placeholder="contoh: aldev" autocapitalize="none" autocomplete="off">
     <div class="err" id="aErr"></div>
-    <button class="btn" style="width:100%" id="aGo">Lanjut</button>
+    <button class="btn" style="width:100%; margin-top:10px;" id="aGo">Mulai Masuk & Daftar</button>
   </div>
 </div>
 
@@ -140,7 +134,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 
 <script>
 const $ = s => document.querySelector(s);
-let creds = JSON.parse(localStorage.getItem('creds') || 'null');
+let myUsername = localStorage.getItem('myUsername') || null;
 let me = null, chats = [], active = null, msgs = [], start = 0, ver = '', prof = {}, prevCount = null, timer, people = [];
 let seen = JSON.parse(localStorage.getItem('seen') || '{}');
 const saveSeen = () => localStorage.setItem('seen', JSON.stringify(seen));
@@ -154,7 +148,6 @@ const fmt = s => esc(s)
   .replace(/\|\|([^|\n]+)\|\|/g, '<span class="sp" onclick="this.classList.toggle(\'on\')">$1</span>')
   .replace(/\n/g, '<br>');
 
-// Centang Biru Resmi (Verified Badge)
 const BLUE = '<svg class="bl" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#2f81f7"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const nameOf = u => (prof[u] && prof[u].name) || u;
 const badge = u => (prof[u] && prof[u].v ? BLUE : '');
@@ -167,14 +160,15 @@ const time = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', m
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 2600); }
 
 async function api(path, body) {
-  const o = { headers: { 'x-user': (creds && creds.u) || '', 'x-token': (creds && creds.t) || '', 'content-type': 'application/json' } };
+  const o = { headers: { 'x-user': myUsername || '', 'content-type': 'application/json' } };
   if (body) { o.method = 'POST'; o.body = JSON.stringify(body); }
   const r = await fetch('/api/' + path, o);
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && creds && path !== 'login') logout();
+  if (r.status === 401 && myUsername) logout();
   if (!r.ok) throw new Error(j.error || 'Gagal');
   return j;
 }
+
 async function ensureProfiles(list, force) {
   const u = [...new Set(list.filter(Boolean))].filter(x => force || !(x in prof));
   if (!u.length) return;
@@ -182,44 +176,50 @@ async function ensureProfiles(list, force) {
   u.forEach(x => (prof[x] = r[x] || { name: x }));
 }
 
-// ---------- auth ----------
-let mode = 'reg';
-function setMode(m) {
-  mode = m;
-  $('#tReg').classList.toggle('on', m === 'reg'); $('#tLog').classList.toggle('on', m === 'log');
-  $('#fReg').classList.toggle('hidden', m !== 'reg'); $('#fLog').classList.toggle('hidden', m !== 'log');
-  $('#aErr').textContent = '';
-}
-$('#tReg').onclick = () => setMode('reg'); $('#tLog').onclick = () => setMode('log');
+// ---------- Proses Pendaftaran Permanen ----------
 $('#aGo').onclick = async () => {
   $('#aErr').textContent = '';
   try {
-    const r = mode === 'reg'
-      ? await api('register', { name: $('#rName').value, username: $('#rUser').value })
-      : await api('login', { username: $('#lUser').value, token: $('#lCode').value.trim() });
-    creds = { u: r.username, t: r.token };
-    localStorage.setItem('creds', JSON.stringify(creds));
+    const name = $('#rName').value;
+    const username = $('#rUser').value;
+    const r = await api('register', { name, username });
+    myUsername = r.username;
+    localStorage.setItem('myUsername', myUsername);
     boot();
-  } catch (e) { $('#aErr').textContent = e.message; }
+  } catch (e) { 
+    $('#aErr').textContent = e.message; 
+  }
 };
-function logout() { localStorage.removeItem('creds'); localStorage.removeItem('seen'); location.reload(); }
+
+function logout() { 
+  localStorage.removeItem('myUsername'); 
+  localStorage.removeItem('seen'); 
+  location.reload(); 
+}
 
 async function boot() {
-  $('#auth').classList.add('hidden'); $('#app').classList.remove('hidden');
+  $('#auth').classList.add('hidden'); 
+  $('#app').classList.remove('hidden');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  me = await api('me');
-  prof[me.username] = { name: me.name, v: me.verified || me.username === 'aldev', a: me.av };
-  drawMe();
-  await loadChats();
-  tick();
+  
+  try {
+    me = await api('me');
+    prof[me.username] = { name: me.name, v: me.verified || me.username === 'aldev', a: me.av };
+    drawMe();
+    await loadChats();
+    tick();
+  } catch(e) {
+    // Kalau username di localStorage ternyata sudah terhapus di redis server
+    logout();
+  }
 }
+
 function drawMe() {
   $('#meAv').innerHTML = avUser(me.username);
   $('#meName').innerHTML = esc(me.name) + (me.verified || me.username === 'aldev' ? BLUE : '');
   $('#meUser').textContent = '@' + me.username;
 }
 
-// ---------- sync & notifikasi + sound fx ----------
 async function tick() {
   try {
     const j = await api('sync');
@@ -230,7 +230,6 @@ async function tick() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { ver = ''; tick(); } });
 
-// Efek Suara (Sound FX) Halus ala Telegram/WhatsApp
 function beep() {
   try {
     const c = new (window.AudioContext || window.webkitAudioContext)(), o = c.createOscillator(), g = c.createGain();
@@ -251,13 +250,14 @@ async function loadChats() {
   const list = await api('chats');
   await ensureProfiles([...list.filter(c => c.type === 'dm').map(c => c.other), ...list.map(c => c.last && c.last.u)], true);
   if (prevCount) list.forEach(c => {
-    if (c.id !== 'global' && c.count > (prevCount[c.id] || 0) && c.last && c.last.u !== creds.u && (c.id !== active || document.hidden)) notify(c);
+    if (c.id !== 'global' && c.count > (prevCount[c.id] || 0) && c.last && c.last.u !== myUsername && (c.id !== active || document.hidden)) notify(c);
   });
   prevCount = Object.fromEntries(list.map(c => [c.id, c.count]));
   list.forEach(c => { if (seen[c.id] === undefined && c.id === 'global') seen[c.id] = c.count; });
   chats = list;
   renderList();
 }
+
 function renderList() {
   const q = $('#q').value.trim().toLowerCase();
   const title = c => c.type === 'dm' ? nameOf(c.other) : c.title;
@@ -266,7 +266,7 @@ function renderList() {
   let html = show.map(c => {
     const u = unread(c);
     const msgText = c.last ? (c.last.t || '🎙️ Pesan suara') : '';
-    const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === creds.u ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
+    const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === myUsername ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
     const a = c.type === 'dm' ? avUser(c.other) : avText(title(c), c.id);
     const isVerifiedGroup = c.id === 'global' || c.verified;
     return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${a}<div class="m">
@@ -284,6 +284,7 @@ function renderList() {
   const n = chats.reduce((a, c) => a + unread(c), 0);
   document.title = (n ? `(${n}) ` : '') + 'Ngobrol';
 }
+
 let qt;
 $('#q').oninput = () => {
   renderList(); clearTimeout(qt);
@@ -292,7 +293,6 @@ $('#q').oninput = () => {
   qt = setTimeout(async () => { try { people = await api('users?q=' + encodeURIComponent(q)); renderList(); } catch (e) {} }, 350);
 };
 
-// ---------- chat & settings / info grup ----------
 async function openChat(id) {
   active = id; msgs = [];
   const c = chats.find(x => x.id === id);
@@ -312,7 +312,6 @@ async function openChat(id) {
 
 $('#back').onclick = () => { active = null; $('#app').classList.remove('open'); $('#chat').classList.add('hidden'); $('#empty').classList.remove('hidden'); renderList(); };
 
-// Tombol Pengaturan dalam Chat (Auto-delete timer & info grup/kode)
 $('#cSettings').onclick = async () => {
   const c = chats.find(x => x.id === active);
   if (!c) return;
@@ -320,12 +319,10 @@ $('#cSettings').onclick = async () => {
   const currentTtl = resTtl.ttl || 0;
 
   let html = `<h3>Pengaturan Chat <button class="ico" onclick="closeModal()">✕</button></h3>`;
-  
   if (c.type === 'group' || c.type === 'global') {
     html += `<label>Kode Undangan Grup</label>
     <div class="code"><span>${c.code || 'global-official'}</span><button class="btn" onclick="copy('${c.code || 'global'}')">Salin</button></div>`;
   }
-  
   if (c.type === 'group' && c.id !== 'global') {
     html += `<label>Ubah Nama Grup</label><input id="modGroupName" value="${esc(c.title)}" maxlength="30">
     <div class="acts"><button class="btn" onclick="updateGroupName('${c.code}')">Simpan Nama</button></div>
@@ -333,7 +330,6 @@ $('#cSettings').onclick = async () => {
       <button class="btn danger" style="width:100%" onclick="deleteGroup('${c.code}')">Hapus Grup</button>
     </div>`;
   }
-
   html += `<label>Timer Pesan Otomatis Terhapus (Auto-Delete)</label>
   <select id="ttlSelect" style="background:var(--bg);color:var(--tx);padding:10px;border-radius:10px;width:100%;border:1px solid var(--line)">
     <option value="0" ${currentTtl === 0 ? 'selected' : ''}>Mati (Default)</option>
@@ -343,7 +339,6 @@ $('#cSettings').onclick = async () => {
     <option value="300" ${currentTtl === 300 ? 'selected' : ''}>5 Menit</option>
   </select>
   <div class="acts" style="margin-top:15px;"><button class="btn" onclick="saveTtl()">Simpan Timer</button></div>`;
-
   modal(html);
 };
 
@@ -399,8 +394,8 @@ function renderMsgs() {
   const c = chats.find(x => x.id === active);
   const grp = c && c.type !== 'dm';
   box.innerHTML = msgs.map((m, i) => {
-    const mine = m.u === creds.u, idx = start + i;
-    const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(creds.u) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
+    const mine = m.u === myUsername, idx = start + i;
+    const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
     
     let contentHtml = '';
     if (m.audio) {
@@ -441,7 +436,6 @@ async function send() {
 $('#send').onclick = send;
 $('#inp').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send(); } };
 
-// ---------- Voice Note (VN) Recorder ----------
 let mediaRec, audioChunks = [];
 $('#vnBtn').onmousedown = async () => {
   if (!active) return toast('Pilih chat dulu');
@@ -476,7 +470,6 @@ $('#vnBtn').onmouseup = () => {
   }
 };
 
-// ---------- modal & menu ----------
 function modal(html) { $('#box').innerHTML = html; $('#modal').classList.remove('hidden'); }
 function closeModal() { $('#modal').classList.add('hidden'); }
 $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
@@ -523,7 +516,6 @@ async function doJoin() {
   try { const r = await api('groups/join', { code: $('#mC').value }); closeModal(); await loadChats(); openChat(r.id); } catch (e) { toast(e.message); }
 }
 
-// ---------- pengaturan akun ----------
 let newAv;
 $('#gear').onclick = async () => {
   newAv = undefined;
@@ -542,10 +534,7 @@ $('#gear').onclick = async () => {
   <label>Centang biru ${me.verified || me.username === 'aldev' ? BLUE : ''}</label>
   ${me.verified || me.username === 'aldev' ? '<div class="ms">Akun kamu sudah terverifikasi developer.</div>' : me.missions.map(m => `<div class="ms"><div class="r"><span>${m.t}</span><span>${m.n}/${m.max}</span></div><div class="bar"><i style="width:${m.n / m.max * 100}%"></i></div></div>`).join('') +
     `<button class="btn" style="margin-top:8px" ${done ? '' : 'disabled'} onclick="claim()">${done ? 'Klaim centang biru' : 'Selesaikan semua misi dulu'}</button>`}
-  <label>Kode pemulihan</label>
-  <div class="code"><span>${creds.t}</span><button class="btn" onclick="copy('${creds.t}')">Salin</button></div>
-  <p style="color:var(--mu);font-size:12.5px;margin-top:6px">Dipakai buat masuk di HP lain. Jangan dibagiin ke siapa pun.</p>
-  <div class="acts"><button class="btn g" onclick="logout()">Keluar</button><button class="btn" onclick="saveMe()">Simpan</button></div>`);
+  <div class="acts"><button class="btn g" onclick="logout()">Keluar / Ganti Akun</button><button class="btn" onclick="saveMe()">Simpan</button></div>`);
   $('#file').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     newAv = await resize(f);
@@ -585,7 +574,15 @@ async function askNotif() {
   toast(p === 'granted' ? 'Notifikasi aktif' : 'Notifikasi ditolak'); $('#nBtn').disabled = p === 'granted';
 }
 
-if (creds) boot().catch(() => {}); else $('#auth').classList.remove('hidden');
+// Cek status login permanen saat halaman dibuka
+if (myUsername) {
+  boot().catch(() => {
+    localStorage.removeItem('myUsername');
+    $('#auth').classList.remove('hidden');
+  });
+} else {
+  $('#auth').classList.remove('hidden');
+}
 </script>
 </body>
 </html>
