@@ -16,11 +16,30 @@ const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10)
 const dmId = (a, b) => 'dm:' + [a, b].sort().join(':');
 const EMOJI = ['❤️', '😂', '👍', '😮', '🔥'];
 
-// --- CONFIG UTAMA & PROTEKSI GRUP ---
+// --- CONFIG UTAMA, PROTEKSI GRUP & WARNA BADGE DEVELOPER ---
 const SYSTEM_CONFIG = {
   mainGroupId: "global",
   mainGroupName: "Channel / Grup Utama Aldev",
+  // PENGATURAN WARNA BADGE KHUSUS DEVELOPER (@aldev)
+  // Set salah satu ke true untuk mengaktifkan warna tersebut!
+  devBadgeColor: {
+    rainbow: true,  // Efek Warna Warni Bergerak (Neon Rainbow)
+    red: false,      // Merah
+    orange: false,   // Oren
+    yellow: false,   // Kuning
+    blue: false      // Biru Standar
+  }
 };
+
+// Fungsi helper penentu warna badge developer
+function getDevBadgeColor() {
+  const c = SYSTEM_CONFIG.devBadgeColor;
+  if (c.rainbow) return 'rainbow';
+  if (c.red) return 'red';
+  if (c.orange) return 'orange';
+  if (c.yellow) return 'yellow';
+  return 'blue';
+}
 
 const h = fn => (req, res) =>
   Promise.resolve(fn(req, res)).catch(e => {
@@ -103,7 +122,7 @@ app.get('/api/me', auth, h(async (req, res) => {
   if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan' });
   if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
   await redis.sadd('days:' + req.u, today());
-  res.json({ ...me, missions: await missions(req.u, me) });
+  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
 }));
 
 app.post('/api/me', auth, h(async (req, res) => {
@@ -144,9 +163,21 @@ app.get('/api/avatar/:u', h(async (req, res) => {
 app.post('/api/profiles', auth, h(async (req, res) => {
   const list = [...new Set((req.body.users || []).map(clean).filter(Boolean))].slice(0, 60);
   const out = {};
+  const devBadge = getDevBadgeColor();
   if (list.length) {
     const rows = await redis.mget(...list.map(u => 'user:' + u));
-    list.forEach((u, i) => { const r = rows[i]; if (r) out[u] = { name: r.name, v: !!r.verified || u === 'aldev', a: r.av || 0, bio: r.bio }; });
+    list.forEach((u, i) => { 
+      const r = rows[i]; 
+      if (r) {
+        out[u] = { 
+          name: r.name, 
+          v: !!r.verified || u === 'aldev', 
+          badgeColor: u === 'aldev' ? devBadge : 'blue',
+          a: r.av || 0, 
+          bio: r.bio 
+        }; 
+      }
+    });
   }
   res.json(out);
 }));
@@ -156,8 +187,15 @@ app.get('/api/users', auth, h(async (req, res) => {
   if (q.length < 2) return res.json([]);
   const all = await redis.smembers('users');
   const rows = await redis.mget(...all.map(u => 'user:' + u));
+  const devBadge = getDevBadgeColor();
   const found = rows.filter(r => r && (r.username.includes(q) || r.name.toLowerCase().includes(q)))
-    .map(r => ({ username: r.username, name: r.name, v: !!r.verified || r.username === 'aldev', a: r.av || 0 }));
+    .map(r => ({ 
+      username: r.username, 
+      name: r.name, 
+      v: !!r.verified || r.username === 'aldev', 
+      badgeColor: r.username === 'aldev' ? devBadge : 'blue',
+      a: r.av || 0 
+    }));
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
 }));
 
@@ -226,7 +264,6 @@ app.post('/api/send', auth, h(async (req, res) => {
   res.json({ ok: 1 });
 }));
 
-// ENDPOINT HAPUS PESAN SESEORANG (TERMASUK VN)
 app.post('/api/delete-message', auth, h(async (req, res) => {
   const { chat, idx } = req.body;
   const u = req.u;
@@ -240,7 +277,6 @@ app.post('/api/delete-message', auth, h(async (req, res) => {
     return res.status(403).json({ error: 'Kamu hanya bisa menghapus pesan milikmu sendiri' });
   }
 
-  // Tandai pesan terhapus
   m.t = '🚮 Pesan ini telah dihapus';
   delete m.audio;
   m.deleted = true;
@@ -281,11 +317,13 @@ app.get('/api/settings/ttl', auth, h(async (req, res) => {
   res.json({ ttl: parseInt(ttl, 10) });
 }));
 
+// Pembuatan Grup Baru (Secara Default Privat / Tidak Langsung Publik)
 app.post('/api/groups', auth, h(async (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 30);
   if (!name) return res.status(400).json({ error: 'Nama grup wajib diisi' });
   const id = crypto.randomBytes(4).toString('hex');
-  await redis.set('group:' + id, { id, name, owner: req.u, members: [req.u] });
+  // Group otomatis private
+  await redis.set('group:' + id, { id, name, owner: req.u, members: [req.u], isPrivate: true });
   await redis.sadd('uchats:' + req.u, 'grp:' + id);
   res.json({ id: 'grp:' + id });
 }));
@@ -314,7 +352,7 @@ app.post('/api/groups/update', auth, h(async (req, res) => {
 app.post('/api/groups/join', auth, h(async (req, res) => {
   const code = String(req.body.code || '').trim().toLowerCase().replace(/[^a-f0-9]/g, '');
   const g = code && (await redis.get('group:' + code));
-  if (!g) return res.status(404).json({ error: 'Kode grup tidak ditemukan' });
+  if (!g) return res.status(404).json({ error: 'Kode grup tidak ditemukan / tidak valid' });
   if (!g.members.includes(req.u)) {
     if (g.members.length >= 200) return res.status(400).json({ error: 'Grup penuh' });
     g.members.push(req.u);
