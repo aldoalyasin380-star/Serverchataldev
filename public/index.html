@@ -41,7 +41,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .btn.danger{background:#ff6b6b;color:#fff}
 .btn:disabled{opacity:.4}
 
-/* Button WA Channel */
+/* Tombol Channel Developer WhatsApp */
 .wa-channel-btn{
   display:flex;align-items:center;gap:10px;padding:10px 14px;margin:8px 12px;
   background:#25d36618;border:1px solid #25d36655;border-radius:12px;
@@ -73,7 +73,24 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .item .p{color:var(--mu);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;justify-content:space-between}
 .un{background:var(--ac);color:#06281b;font-size:12px;font-weight:700;border-radius:10px;padding:1px 7px;margin-left:6px}
 .pinned-tag{font-size:11px;color:var(--ac);margin-right:4px}
-.fab{position:absolute;right:18px;bottom:22px;width:54px;height:54px;border-radius:16px;background:var(--ac);color:#06281b;font-size:28px;box-shadow:0 6px 18px #0008}
+
+/* Posisi Tombol + yang sudah dinaikkan agar aman dari bar HP */
+.fab{
+  position:absolute;
+  right:18px;
+  bottom:75px;
+  width:50px;
+  height:50px;
+  border-radius:14px;
+  background:var(--ac);
+  color:#06281b;
+  font-size:26px;
+  box-shadow:0 6px 18px #0008;
+  z-index:10;
+  display:grid;
+  place-items:center;
+}
+
 .main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .empty{margin:auto;color:var(--mu);text-align:center;padding:20px}
 #chat{display:flex;flex-direction:column;height:100%;min-height:0}
@@ -427,18 +444,15 @@ async function openChat(id) {
   $('#inp').focus();
 }
 
-// PERBAIKAN LOGIKA SUB-HEADER CHAT
 async function updateHeaderSub() {
   if (!active) return;
   const c = chats.find(x => x.id === active);
   
-  // Jika Chat Pribadi (DM), tampilkan username saja (TIDAK ADA TEKS "Host aktif · X online")
   if (c && c.type === 'dm') {
     $('#cSub').textContent = '@' + c.other;
     return;
   }
 
-  // Jika Grup, tampilkan status member online
   try {
     const res = await api('group-members?chat=' + encodeURIComponent(active));
     $('#cSub').textContent = `${res.onlineCount} online · ${res.total} member`;
@@ -447,7 +461,6 @@ async function updateHeaderSub() {
   }
 }
 
-// Modal Detail Profil & Anggota
 async function showGroupInfo() {
   if (!active) return;
   const c = chats.find(x => x.id === active);
