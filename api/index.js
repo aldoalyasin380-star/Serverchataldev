@@ -16,17 +16,15 @@ const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10)
 const dmId = (a, b) => 'dm:' + [a, b].sort().join(':');
 const EMOJI = ['❤️', '😂', '👍', '😮', '🔥'];
 
-// --- CONFIG UTAMA, PROTEKSI GRUP & WARNA BADGE DEVELOPER ---
 const SYSTEM_CONFIG = {
   mainGroupId: "global",
-  mainGroupName: "Channel / Grup Utama Aldev",
-  // PENGATURAN WARNA BADGE KHUSUS DEVELOPER (@aldev)
+  mainGroupName: "Global Group",
   devBadgeColor: {
-    rainbow: true,  // Efek Warna Warni Bergerak (Neon Rainbow)
-    red: false,      // Merah
-    orange: false,   // Oren
-    yellow: false,   // Kuning
-    blue: false      // Biru Standar
+    rainbow: true,
+    red: false,
+    orange: false,
+    yellow: false,
+    blue: false
   }
 };
 
@@ -93,27 +91,15 @@ app.post('/api/register', h(async (req, res) => {
   if (username.length < 3) return res.status(400).json({ error: 'Username minimal 3 karakter' });
 
   const existingUser = await redis.get('user:' + username);
-
-  if (existingUser) {
-    return res.json({ username: existingUser.username });
-  }
+  if (existingUser) return res.json({ username: existingUser.username });
 
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
 
   const isAldev = username === 'aldev';
-  const userData = {
-    username,
-    name,
-    bio: '',
-    av: 0,
-    verified: isAldev ? true : false,
-    created: Date.now()
-  };
+  const userData = { username, name, bio: '', av: 0, verified: isAldev ? true : false, created: Date.now() };
 
   await redis.set('user:' + username, userData);
   await redis.sadd('users', username);
-
-  // Otomatis tambahkan user baru ke daftar chat global
   await redis.sadd('uchats:' + username, 'global');
 
   res.json({ username });
@@ -123,7 +109,11 @@ app.get('/api/me', auth, h(async (req, res) => {
   let me = await redis.get('user:' + req.u);
   if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan' });
   if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
+  
+  // Update heartbeat online
+  await redis.set('online:' + req.u, Date.now(), { ex: 30 });
   await redis.sadd('days:' + req.u, today());
+
   res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
 }));
 
@@ -163,11 +153,12 @@ app.get('/api/avatar/:u', h(async (req, res) => {
 }));
 
 app.post('/api/profiles', auth, h(async (req, res) => {
-  const list = [...new Set((req.body.users || []).map(clean).filter(Boolean))].slice(0, 60);
+  const list = [...new Set((req.body.users || []).map(clean).filter(Boolean))].slice(0, 100);
   const out = {};
   const devBadge = getDevBadgeColor();
   if (list.length) {
     const rows = await redis.mget(...list.map(u => 'user:' + u));
+    const onlineKeys = await redis.mget(...list.map(u => 'online:' + u));
     list.forEach((u, i) => { 
       const r = rows[i]; 
       if (r) {
@@ -176,12 +167,48 @@ app.post('/api/profiles', auth, h(async (req, res) => {
           v: !!r.verified || u === 'aldev', 
           badgeColor: u === 'aldev' ? devBadge : 'blue',
           a: r.av || 0, 
-          bio: r.bio 
+          bio: r.bio,
+          online: !!onlineKeys[i]
         }; 
       }
     });
   }
   res.json(out);
+}));
+
+// API Anggota Grup / Global Detail
+app.get('/api/group-members', auth, h(async (req, res) => {
+  const chat = String(req.query.chat || '');
+  let usernames = [];
+  if (chat === 'global') {
+    usernames = await redis.smembers('users');
+  } else if (chat.startsWith('grp:')) {
+    const g = await redis.get('group:' + chat.slice(4));
+    if (g) usernames = g.members;
+  } else if (chat.startsWith('dm:')) {
+    usernames = chat.slice(3).split(':');
+  }
+
+  const devBadge = getDevBadgeColor();
+  const rows = usernames.length ? await redis.mget(...usernames.map(u => 'user:' + u)) : [];
+  const onlineKeys = usernames.length ? await redis.mget(...usernames.map(u => 'online:' + u)) : [];
+
+  let onlineCount = 0;
+  const list = usernames.map((u, i) => {
+    const r = rows[i] || { name: u, username: u };
+    const isOnline = !!onlineKeys[i];
+    if (isOnline) onlineCount++;
+    return {
+      username: u,
+      name: r.name || u,
+      v: !!r.verified || u === 'aldev',
+      badgeColor: u === 'aldev' ? devBadge : 'blue',
+      a: r.av || 0,
+      online: isOnline
+    };
+  });
+
+  res.json({ total: usernames.length, onlineCount, members: list });
 }));
 
 app.get('/api/users', auth, h(async (req, res) => {
@@ -201,8 +228,8 @@ app.get('/api/users', auth, h(async (req, res) => {
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
 }));
 
-// ---------- Chat, Hapus Pesan, & Auto-Delete Timer ----------
 app.get('/api/sync', auth, h(async (req, res) => {
+  await redis.set('online:' + req.u, Date.now(), { ex: 30 });
   const [a, b] = await redis.mget('ver:' + req.u, 'ver:global');
   res.json({ v: (a || 0) + '.' + (b || 0) });
 }));
