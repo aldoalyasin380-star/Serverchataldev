@@ -194,6 +194,10 @@ select:focus{border-color:var(--ac)}
       <input id="rUser" maxlength="20" placeholder="contoh: aldev" autocapitalize="none" autocomplete="off">
       <label>Nama (Khusus Pengguna Baru)</label>
       <input id="rName" maxlength="30" placeholder="Nama kamu (jika baru daftar)">
+      <div id="recBox" class="hidden">
+        <label>Kode pemulihan owner</label>
+        <input id="recKey" type="password" placeholder="kode rahasia owner" autocomplete="off">
+      </div>
       <div class="err" id="aErr"></div>
       <button class="btn" style="width:100%; margin-top:10px;" id="aGo">Masuk / Daftar</button>
     </div>
@@ -324,7 +328,7 @@ async function api(path, body) {
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && myUsername) logout();
   if (r.status === 403 && j.blocked && myUsername) { sessionStorage.setItem('authErr', j.error || ''); logout(); }
-  if (!r.ok) throw new Error(j.error || 'Gagal');
+  if (!r.ok) { const err = new Error(j.error || 'Gagal'); err.blocked = !!j.blocked; throw err; }
   return j;
 }
 
@@ -338,11 +342,16 @@ async function ensureProfiles(list, force) {
 $('#aGo').onclick = async () => {
   $('#aErr').textContent = '';
   try {
-    const r = await api('register', { name: $('#rName').value, username: $('#rUser').value });
+    const body = { name: $('#rName').value, username: $('#rUser').value };
+    if (!$('#recBox').classList.contains('hidden') && $('#recKey').value) body.recoverKey = $('#recKey').value;
+    const r = await api('register', body);
     myUsername = r.username;
     localStorage.setItem('myUsername', myUsername);
     boot();
-  } catch (e) { $('#aErr').textContent = e.message; }
+  } catch (e) {
+    $('#aErr').textContent = e.message;
+    if (e.blocked) $('#recBox').classList.remove('hidden');
+  }
 };
 
 function logout() { localStorage.removeItem('myUsername'); localStorage.removeItem('seen'); location.reload(); }
