@@ -89,7 +89,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .comp .btn{border-radius:22px;padding:0 16px;height:42px}
 .hint{font-size:11.5px;color:var(--mu);text-align:center;padding:0 12px 6px}
 
-/* Search bar in chat room */
+/* In Chat Search */
 .chat-search-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 .chat-search-bar input{border-radius:8px;padding:6px 10px;font-size:13px}
 
@@ -100,7 +100,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .box label{display:block;font-size:12px;color:var(--mu);margin:12px 0 5px;text-transform:uppercase;letter-spacing:.04em}
 .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
 
-/* Action sheet Bottom Menu */
 .action-sheet{position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-radius:20px 20px 0 0;padding:16px;z-index:45;border-top:1px solid var(--line);animation:slideUp .2s ease-out}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .action-item{display:flex;align-items:center;gap:12px;padding:14px;width:100%;font-size:15px;color:var(--tx);border-radius:10px;text-align:left}
@@ -111,6 +110,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .member-list-item .m-info{flex:1;min-width:0}
 .member-list-item .m-info b{display:block;font-size:14px}
 .member-list-item .m-info span{font-size:12px;color:var(--mu)}
+.member-list-item .m-role{font-size:11px;background:#ffffff15;padding:2px 6px;border-radius:6px;color:var(--ac);margin-left:auto}
 
 .code{font-family:ui-monospace,monospace;color:#6cb6ff;background:var(--bg);padding:10px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;word-break:break-all}
 #toast{position:fixed;left:50%;top:14px;transform:translateX(-50%);background:#222833;border:1px solid var(--line);padding:10px 16px;border-radius:12px;z-index:60;max-width:90vw;opacity:0;pointer-events:none;transition:.2s}
@@ -157,7 +157,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
         <button class="ico" id="cMenuBtn" title="Menu Opsi">⋮</button>
       </div>
 
-      <!-- In-Chat Search Bar -->
       <div id="chatSearchBar" class="chat-search-bar hidden">
         <input id="inChatSearchInput" placeholder="Cari pesan di chat ini..." autocomplete="off">
         <button class="btn g" onclick="closeInChatSearch()" style="padding:6px 12px;height:auto">Tutup</button>
@@ -213,8 +212,14 @@ const badge = u => {
 
 const hue = s => ([...s].reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 360;
 const avText = (text, seed, cls = '') => `<div class="av ${cls}" style="background:hsl(${hue(seed)} 35% 38%)">${esc((text || '?')[0]).toUpperCase()}</div>`;
-const avUser = (u, cls = '') => prof[u] && prof[u].a
-  ? `<img class="av ${cls}" src="/api/avatar/${u}?t=${prof[u].a}">` : avText(nameOf(u), u, cls);
+const avUser = (u, cls = '') => {
+  if (prof[u] && prof[u].a) {
+    const src = typeof prof[u].a === 'string' && prof[u].a.startsWith('http') ? prof[u].a : `/api/avatar/${u}?t=${prof[u].a}`;
+    return `<img class="av ${cls}" src="${src}">`;
+  }
+  return avText(nameOf(u), u, cls);
+};
+
 const time = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 2600); }
@@ -345,11 +350,16 @@ function renderList() {
     const u = unread(c);
     const msgText = c.last ? (c.last.t || '🎙️ Pesan suara') : '';
     const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === myUsername ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
-    const a = c.type === 'dm' ? avUser(c.other) : avText(title(c), c.id);
+    
+    let aHtml = '';
+    if (c.type === 'dm') aHtml = avUser(c.other);
+    else if (c.avatar) aHtml = `<img class="av" src="${c.avatar}">`;
+    else aHtml = avText(title(c), c.id);
+
     const isVerifiedGroup = c.id === 'global' || c.verified;
     const isPinned = pinnedChats.includes(c.id);
 
-    return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${a}<div class="m">
+    return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${aHtml}<div class="m">
       <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
       <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `<span class="un">${u}</span>` : ''}</div></div></div></div>`;
   }).join('');
@@ -384,8 +394,13 @@ async function openChat(id) {
   const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '');
   
   $('#cName').innerHTML = esc(t) + headerBadge;
-  $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
   
+  if (c && c.type !== 'dm' && c.avatar) {
+    $('#cAv').innerHTML = `<img class="av s" src="${c.avatar}">`;
+  } else {
+    $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
+  }
+
   updateHeaderSub();
   
   $('#msgs').innerHTML = '';
@@ -404,7 +419,7 @@ async function updateHeaderSub() {
   }
 }
 
-// Modal Info Anggota Mirip Screenshot 1
+// Modal Detail Profil & Anggota
 async function showGroupInfo() {
   if (!active) return;
   const c = chats.find(x => x.id === active);
@@ -414,32 +429,96 @@ async function showGroupInfo() {
     const res = await api('group-members?chat=' + encodeURIComponent(active));
     const title = c.type === 'dm' ? nameOf(c.other) : c.title;
 
+    let myRole = 'member';
+    const meObj = res.members.find(m => m.username === myUsername);
+    if (meObj) myRole = meObj.role;
+
     let memberHtml = res.members.map(m => {
       prof[m.username] = { name: m.name, v: m.v, badgeColor: m.badgeColor, a: m.a };
-      return `<div class="member-list-item" onclick="startDm('${m.username}')">
-        ${avUser(m.username, 's')}
-        <div class="m-info">
-          <b>${esc(m.name)}${badge(m.username)}</b>
-          <span>@${m.username} ${m.online ? '· <span style="color:var(--ac)">Online</span>' : ''}</span>
+      const canManage = (myRole === 'owner' || myRole === 'admin') && m.username !== myUsername && m.username !== 'aldev';
+
+      return `<div class="member-list-item">
+        <div onclick="startDm('${m.username}')" style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer">
+          ${avUser(m.username, 's')}
+          <div class="m-info">
+            <b>${esc(m.name)}${badge(m.username)}</b>
+            <span>@${m.username} ${m.online ? '· <span style="color:var(--ac)">Online</span>' : ''}</span>
+          </div>
         </div>
+        <span class="m-role">${m.role.toUpperCase()}</span>
+        ${canManage && c.type === 'group' ? `
+          <button class="btn danger" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="kickMember('${m.username}')">Kick</button>
+          ${myRole === 'owner' && m.role !== 'admin' ? `<button class="btn" style="padding:4px 8px;font-size:11px;margin-left:4px" onclick="promoteMember('${m.username}')">Admin</button>` : ''}
+        ` : ''}
       </div>`;
     }).join('');
 
+    let groupHeaderAv = c.type === 'dm' ? avUser(c.other, 'lg') : (c.avatar ? `<img class="av lg" src="${c.avatar}">` : avText(title, c.id, 'lg'));
+
     modal(`
       <div style="text-align:center">
-        ${c.type === 'dm' ? avUser(c.other, 'lg') : avText(title, c.id, 'lg')}
+        ${groupHeaderAv}
         <h2 style="font-size:20px;">${esc(title)}</h2>
         <p style="color:var(--mu);font-size:13px;">Ruang bersama (${res.onlineCount} online dari ${res.total} member)</p>
+        ${c.type === 'group' && (myRole === 'owner' || myRole === 'admin') ? `
+          <button class="btn g" style="margin-top:10px;font-size:12px;" onclick="editGroupAvatarModal('${c.code}')">📷 Ubah Foto Profil Grup</button>
+        ` : ''}
       </div>
-      <label style="margin-top:20px;">Anggota di Chat Ini</label>
-      <div style="max-height:260px;overflow:auto;margin-top:8px">${memberHtml}</div>
+      
+      ${c.type === 'group' ? `
+        <label style="margin-top:15px;">Kode / Link Undangan Grup</label>
+        <div class="code"><span>${c.code}</span><button class="btn" onclick="copy('${c.code}')">Salin Kode</button></div>
+      ` : ''}
+
+      <label style="margin-top:20px;">Daftar Anggota (${res.total})</label>
+      <div style="max-height:220px;overflow:auto;margin-top:8px">${memberHtml}</div>
     `);
+  } catch(e) { toast(e.message); }
+}
+
+async function kickMember(targetUser) {
+  if (!confirm(`Yakin ingin mengeluarkan @${targetUser}?`)) return;
+  const c = chats.find(x => x.id === active);
+  try {
+    await api('groups/update', { code: c.code, action: 'kick', targetUser });
+    toast('Anggota dikeluarkan');
+    showGroupInfo();
+  } catch(e) { toast(e.message); }
+}
+
+async function promoteMember(targetUser) {
+  const c = chats.find(x => x.id === active);
+  try {
+    await api('groups/update', { code: c.code, action: 'promote', targetUser });
+    toast('Anggota diangkat jadi Admin');
+    showGroupInfo();
+  } catch(e) { toast(e.message); }
+}
+
+function editGroupAvatarModal(code) {
+  modal(`<h3>Ubah Foto Profil Grup</h3>
+    <label>URL Gambar Baru</label>
+    <input id="newGrpAv" placeholder="https://files.catbox.moe/...">
+    <div class="acts">
+      <button class="btn g" onclick="closeModal()">Batal</button>
+      <button class="btn" onclick="saveGroupAvatar('${code}')">Simpan</button>
+    </div>
+  `);
+}
+
+async function saveGroupAvatar(code) {
+  const avatar = $('#newGrpAv').value.trim();
+  if (!avatar) return toast('URL Gambar kosong');
+  try {
+    await api('groups/update', { code, avatar });
+    closeModal();
+    loadChats();
+    toast('Foto profil grup diubah');
   } catch(e) { toast(e.message); }
 }
 
 $('#back').onclick = () => { active = null; $('#app').classList.remove('open'); $('#chat').classList.add('hidden'); $('#empty').classList.remove('hidden'); renderList(); };
 
-// Action Sheet WhatsApp Style (Tombol Titik 3)
 $('#cMenuBtn').onclick = () => {
   if (!active) return;
   const isPinned = pinnedChats.includes(active);
@@ -597,7 +676,7 @@ async function send() {
 $('#send').onclick = send;
 $('#inp').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send(); } };
 
-// ---------- Voice Note (VN) Recorder + Stop/Cancel ----------
+// ---------- Voice Note (VN) ----------
 let mediaRec, audioChunks = [], isRecording = false, isCanceled = false;
 
 $('#vnBtn').onclick = async () => {
