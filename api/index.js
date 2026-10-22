@@ -644,6 +644,36 @@ app.post('/api/dm', auth, h(async (req, res) => {
   res.json({ id });
 }));
 
+// ---------- Koleksi stiker pribadi ----------
+const STK_LIMIT = 40;
+const validSticker = (k, d) => d.length <= 700000 && (
+  (k === 'img' && /^data:image\/(webp|png);base64,/.test(d)) ||
+  (k === 'vid' && /^data:video\/(webm|mp4)[;,]/.test(d)));
+const stkId = d => crypto.createHash('sha1').update(d).digest('hex').slice(0, 16);
+
+app.get('/api/stickers', auth, h(async (req, res) => {
+  const all = (await redis.hgetall('stkpack:' + req.u)) || {};
+  res.json(Object.values(all));
+}));
+
+app.post('/api/stickers/save', auth, h(async (req, res) => {
+  const k = String(req.body.k || ''), d = String(req.body.d || '');
+  if (!validSticker(k, d)) return res.status(400).json({ error: 'Stiker tidak valid' });
+  const id = stkId(d);
+  const key = 'stkpack:' + req.u;
+  const exists = await redis.hexists(key, id);
+  if (!exists && (await redis.hlen(key)) >= STK_LIMIT)
+    return res.status(400).json({ error: 'Koleksi stiker penuh (maks ' + STK_LIMIT + '). Hapus dulu yang nggak dipakai.' });
+  await redis.hset(key, { [id]: { k, d, id } });
+  res.json({ ok: 1, id });
+}));
+
+app.post('/api/stickers/remove', auth, h(async (req, res) => {
+  const id = String(req.body.id || '').replace(/[^a-f0-9]/g, '');
+  if (id) await redis.hdel('stkpack:' + req.u, id);
+  res.json({ ok: 1 });
+}));
+
 // ---------- Pembersihan mingguan (Vercel Cron) ----------
 // Hapus pesan yang umurnya lebih dari 7 hari di semua chat biar database nggak jebol.
 // Dijadwalkan di vercel.json. Butuh env CRON_SECRET (Vercel ngirim otomatis).
