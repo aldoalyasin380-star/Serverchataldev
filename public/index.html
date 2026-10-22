@@ -14,7 +14,27 @@ button{cursor:pointer;border:0;background:none;touch-action:manipulation}
 .hidden{display:none!important}
 .av{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;font-weight:600;color:#fff}
 .av.s{width:36px;height:36px;font-size:14px}
+
+/* STYLING BADGE EFEK WARNA-WARNI KHUSUS */
 .bl{width:15px;height:15px;vertical-align:-2px;margin-left:4px}
+.bl.red circle{fill:#ff4757!important}
+.bl.orange circle{fill:#ffa502!important}
+.bl.yellow circle{fill:#eccc68!important}
+.bl.blue circle{fill:#2f81f7!important}
+
+/* Animasi Rainbow Neon khusus Developer */
+@keyframes rainbowGlow {
+  0% { fill: #ff0055; filter: drop-shadow(0 0 2px #ff0055); }
+  20% { fill: #ff9900; filter: drop-shadow(0 0 2px #ff9900); }
+  40% { fill: #33cc33; filter: drop-shadow(0 0 2px #33cc33); }
+  60% { fill: #00ccff; filter: drop-shadow(0 0 2px #00ccff); }
+  80% { fill: #9933ff; filter: drop-shadow(0 0 2px #9933ff); }
+  100% { fill: #ff0055; filter: drop-shadow(0 0 2px #ff0055); }
+}
+.bl.rainbow circle {
+  animation: rainbowGlow 2.5s infinite linear;
+}
+
 input,textarea{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;width:100%;outline:none}
 input:focus,textarea:focus{border-color:var(--ac)}
 .btn{background:var(--ac);color:#06281b;font-weight:600;padding:10px 16px;border-radius:10px}
@@ -149,9 +169,16 @@ const fmt = s => esc(s)
   .replace(/\|\|([^|\n]+)\|\|/g, '<span class="sp" onclick="this.classList.toggle(\'on\')">$1</span>')
   .replace(/\n/g, '<br>');
 
-const BLUE = '<svg class="bl" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#2f81f7"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// Render SVG Badge dengan Pilihan Warna
+const getBadgeSvg = (color = 'blue') => `<svg class="bl ${color}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#2f81f7"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 const nameOf = u => (prof[u] && prof[u].name) || u;
-const badge = u => (prof[u] && prof[u].v ? BLUE : '');
+const badge = u => {
+  if (!prof[u] || !prof[u].v) return '';
+  const color = prof[u].badgeColor || 'blue';
+  return getBadgeSvg(color);
+};
+
 const hue = s => ([...s].reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 360;
 const avText = (text, seed, cls = '') => `<div class="av ${cls}" style="background:hsl(${hue(seed)} 35% 38%)">${esc((text || '?')[0]).toUpperCase()}</div>`;
 const avUser = (u, cls = '') => prof[u] && prof[u].a
@@ -207,7 +234,12 @@ async function boot() {
   
   try {
     me = await api('me');
-    prof[me.username] = { name: me.name, v: me.verified || me.username === 'aldev', a: me.av };
+    prof[me.username] = { 
+      name: me.name, 
+      v: me.verified || me.username === 'aldev', 
+      badgeColor: me.devBadgeColor || 'blue',
+      a: me.av 
+    };
     drawMe();
     await loadChats();
     tick();
@@ -217,8 +249,10 @@ async function boot() {
 }
 
 function drawMe() {
+  const color = me.devBadgeColor || 'blue';
+  const badgeSvg = (me.verified || me.username === 'aldev') ? getBadgeSvg(color) : '';
   $('#meAv').innerHTML = avUser(me.username);
-  $('#meName').innerHTML = esc(me.name) + (me.verified || me.username === 'aldev' ? BLUE : '');
+  $('#meName').innerHTML = esc(me.name) + badgeSvg;
   $('#meUser').textContent = '@' + me.username;
 }
 
@@ -272,14 +306,14 @@ function renderList() {
     const a = c.type === 'dm' ? avUser(c.other) : avText(title(c), c.id);
     const isVerifiedGroup = c.id === 'global' || c.verified;
     return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${a}<div class="m">
-      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? BLUE : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
+      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
       <div class="p">${esc(prev)}${u ? `<span class="un">${u}</span>` : ''}</div></div></div>`;
   }).join('');
   if (!show.length && !people.length) html = '<div class="empty" style="padding:30px">Belum ada chat.</div>';
   if (people.length) {
     html += '<div class="sec">Orang</div>' + people.map(p => {
-      prof[p.username] = prof[p.username] || { name: p.name, v: p.v, a: p.a };
-      return `<div class="item" onclick="startDm('${p.username}')">${avUser(p.username)}<div class="m"><div class="t"><b>${esc(p.name)}${p.v || p.username === 'aldev' ? BLUE : ''}</b></div><div class="p">@${p.username}</div></div></div>`;
+      prof[p.username] = prof[p.username] || { name: p.name, v: p.v, badgeColor: p.badgeColor || 'blue', a: p.a };
+      return `<div class="item" onclick="startDm('${p.username}')">${avUser(p.username)}<div class="m"><div class="t"><b>${esc(p.name)}${badge(p.username)}</b></div><div class="p">@${p.username}</div></div></div>`;
     }).join('');
   }
   $('#list').innerHTML = html;
@@ -301,8 +335,10 @@ async function openChat(id) {
   if (c) seen[id] = c.count; saveSeen();
   $('#app').classList.add('open'); $('#empty').classList.add('hidden'); $('#chat').classList.remove('hidden');
   const t = c ? (c.type === 'dm' ? nameOf(c.other) : c.title) : '';
-  const isVerified = (c && c.type === 'dm' && prof[c.other] && prof[c.other].v) || id === 'global';
-  $('#cName').innerHTML = esc(t) + (isVerified ? BLUE : '');
+  const isVerifiedGroup = id === 'global';
+  const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '');
+  
+  $('#cName').innerHTML = esc(t) + headerBadge;
   $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
   $('#cSub').textContent = !c ? '' : c.type === 'dm' ? '@' + c.other : c.type === 'group' ? c.members + ' anggota · kode ' + c.code : 'Grup resmi terverifikasi';
   $('#cSettings').classList.remove('hidden');
@@ -322,8 +358,9 @@ $('#cSettings').onclick = async () => {
 
   let html = `<h3>Pengaturan Chat <button class="ico" onclick="closeModal()">✕</button></h3>`;
   if (c.type === 'group' || c.type === 'global') {
-    html += `<label>Kode Undangan Grup</label>
-    <div class="code"><span>${c.code || 'global-official'}</span><button class="btn" onclick="copy('${c.code || 'global'}')">Salin</button></div>`;
+    html += `<label>Kode Undangan Grup (Privat)</label>
+    <div class="code"><span>${c.code || 'global-official'}</span><button class="btn" onclick="copy('${c.code || 'global'}')">Salin Kode</button></div>
+    <p style="color:var(--mu);font-size:12px;margin-top:4px">Grup tidak publik. Orang lain hanya bisa masuk via kode ini.</p>`;
   }
   if (c.type === 'group' && c.id !== 'global') {
     html += `<label>Ubah Nama Grup</label><input id="modGroupName" value="${esc(c.title)}" maxlength="30">
@@ -411,7 +448,7 @@ function renderMsgs() {
     const canDelete = mine || myUsername === 'aldev';
 
     return `<div class="row ${mine ? 'me' : ''}"><div class="b" ondblclick="react(${idx},'❤️')">
-      ${grp && !mine ? `<div class="who">${esc(nameOf(m.u))}${badge(m.u) || (m.u === 'aldev' ? BLUE : '')}</div>` : ''}
+      ${grp && !mine ? `<div class="who">${esc(nameOf(m.u))}${badge(m.u)}</div>` : ''}
       ${contentHtml}
       <div class="meta">${time(m.ts)}
         ${!m.deleted && canDelete ? `<button class="del-btn" title="Hapus pesan" onclick="deleteMessage(${idx})">🗑️</button>` : ''}
@@ -422,7 +459,6 @@ function renderMsgs() {
   if (first || near) box.scrollTop = box.scrollHeight;
 }
 
-// Fungsi Hapus Pesan
 async function deleteMessage(idx) {
   if(!confirm('Hapus pesan ini?')) return;
   try {
@@ -462,7 +498,6 @@ $('#vnBtn').onclick = async () => {
   if (!active) return toast('Pilih chat dulu');
 
   if (!isRecording) {
-    // Mulai Rekam VN
     audioChunks = [];
     isCanceled = false;
     try {
@@ -493,7 +528,6 @@ $('#vnBtn').onclick = async () => {
       toast('Merekam VN... Klik Kirim VN atau 🛑 Batal');
     } catch(e) { toast('Gagal akses mic'); }
   } else {
-    // Selesai Rekam & Kirim VN
     if (mediaRec && mediaRec.state === 'recording') {
       mediaRec.stop();
     }
@@ -503,7 +537,6 @@ $('#vnBtn').onclick = async () => {
   }
 };
 
-// Batalkan Rekam VN
 $('#cancelVnBtn').onclick = () => {
   if (isRecording && mediaRec) {
     isCanceled = true;
@@ -521,7 +554,7 @@ function copy(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Pro
 
 $('#fab').onclick = () => modal(`<h3>Baru</h3><div class="menu">
   <button onclick="dmModal()">💬 Chat / kontak baru</button>
-  <button onclick="groupModal()">👥 Buat grup</button>
+  <button onclick="groupModal()">👥 Buat grup privat</button>
   <button onclick="joinModal()">🔗 Gabung grup lewat kode</button></div>`);
 
 function dmModal() {
@@ -544,7 +577,7 @@ async function startDm(username, id) {
   } catch (e) { toast(e.message); }
 }
 function groupModal() {
-  modal(`<h3>Buat grup</h3><label>Nama grup</label><input id="mG" maxlength="30" placeholder="Nama grup">
+  modal(`<h3>Buat grup privat</h3><label>Nama grup</label><input id="mG" maxlength="30" placeholder="Nama grup">
   <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="doGroup()">Buat</button></div>`);
   $('#mG').focus();
 }
@@ -566,6 +599,8 @@ $('#gear').onclick = async () => {
   me = await api('me');
   const done = me.missions.every(m => m.n >= m.max);
   const notifOn = 'Notification' in window && Notification.permission === 'granted';
+  const badgeSvg = (me.verified || me.username === 'aldev') ? getBadgeSvg(me.devBadgeColor || 'blue') : '';
+
   modal(`<h3>Pengaturan <button class="ico" onclick="closeModal()">✕</button></h3>
   <div style="display:flex;gap:12px;align-items:center"><div id="avPrev">${avUser(me.username)}</div>
     <button class="btn g" onclick="$('#file').click()">Ganti foto</button><button class="btn g" onclick="rmAv()">Hapus</button>
@@ -575,8 +610,8 @@ $('#gear').onclick = async () => {
   <label>Bio</label><textarea id="sBio" rows="2" maxlength="120">${esc(me.bio || '')}</textarea>
   <label>Notifikasi</label>
   <button class="btn g" id="nBtn" ${notifOn ? 'disabled' : ''} onclick="askNotif()">${notifOn ? 'Notifikasi aktif' : 'Aktifkan notifikasi'}</button>
-  <label>Centang biru ${me.verified || me.username === 'aldev' ? BLUE : ''}</label>
-  ${me.verified || me.username === 'aldev' ? '<div class="ms">Akun kamu sudah terverifikasi developer.</div>' : me.missions.map(m => `<div class="ms"><div class="r"><span>${m.t}</span><span>${m.n}/${m.max}</span></div><div class="bar"><i style="width:${m.n / m.max * 100}%"></i></div></div>`).join('') +
+  <label>Centang verified ${badgeSvg}</label>
+  ${me.verified || me.username === 'aldev' ? '<div class="ms">Akun kamu sudah terverifikasi.</div>' : me.missions.map(m => `<div class="ms"><div class="r"><span>${m.t}</span><span>${m.n}/${m.max}</span></div><div class="bar"><i style="width:${m.n / m.max * 100}%"></i></div></div>`).join('') +
     `<button class="btn" style="margin-top:8px" ${done ? '' : 'disabled'} onclick="claim()">${done ? 'Klaim centang biru' : 'Selesaikan semua misi dulu'}</button>`}
   <div class="acts"><button class="btn g" onclick="logout()">Keluar / Ganti Akun</button><button class="btn" onclick="saveMe()">Simpan</button></div>`);
   $('#file').onchange = async e => {
@@ -604,7 +639,7 @@ async function saveMe() {
     const b = { name: $('#sName').value, bio: $('#sBio').value };
     if (newAv !== undefined) b.avatar = newAv;
     await api('me', b);
-    me = await api('me'); prof[me.username] = { name: me.name, v: me.verified, a: me.av };
+    me = await api('me'); prof[me.username] = { name: me.name, v: me.verified, badgeColor: me.devBadgeColor || 'blue', a: me.av };
     drawMe(); closeModal(); toast('Tersimpan'); renderList();
   } catch (e) { toast(e.message); }
 }
