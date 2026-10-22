@@ -174,6 +174,12 @@ html,body{background:#07080b}
 .dots i:nth-child(2){animation-delay:.18s}.dots i:nth-child(3){animation-delay:.36s}
 @keyframes dot{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
 
+select{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;color:inherit;font:inherit;outline:none}
+select:focus{border-color:var(--ac)}
+.stk{width:150px;height:150px;object-fit:contain;display:block;background:transparent}
+.stk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.stk-cell{aspect-ratio:1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;display:grid;place-items:center;overflow:hidden}
+.stk-cell img,.stk-cell video{width:100%;height:100%;object-fit:contain}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -237,6 +243,7 @@ html,body{background:#07080b}
       </div>
       <div class="comp">
         <input id="inp" placeholder="Tulis pesan..." maxlength="2000" autocomplete="off">
+        <button class="btn g" id="stkBtn" title="Stiker">😺</button>
         <button class="btn g" id="vnBtn" title="Tekan untuk Rekam VN">🎙️</button>
         <button class="btn danger hidden" id="cancelVnBtn" title="Batalkan VN">🛑</button>
         <button class="btn" id="send">Kirim</button>
@@ -296,12 +303,22 @@ const avUser = (u, cls = '') => {
 const time = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 2600); }
 
+/* kunci perangkat: bukti kalau ini HP yang dulu dipakai bikin akun (biar nggak ke-lock pas IP ganti) */
+const cleanU = u => String(u || '').toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_.]/g, '').slice(0, 20);
+const devKeys = () => { try { return JSON.parse(localStorage.getItem('devKeys') || '{}'); } catch (e) { return {}; } };
+function setDevKey(u, k) { const d = devKeys(); d[u] = k; localStorage.setItem('devKeys', JSON.stringify(d)); }
+
 async function api(path, body) {
-  const o = { headers: { 'x-user': myUsername || '', 'content-type': 'application/json' } };
+  const who = (path === 'register' && body) ? cleanU(body.username) : myUsername;
+  const o = { headers: { 'x-user': myUsername || who || '', 'x-device': devKeys()[who] || '', 'content-type': 'application/json' } };
+  if (path === 'register' && body) o.headers['x-user'] = who;
   if (body) { o.method = 'POST'; o.body = JSON.stringify(body); }
   const r = await fetch('/api/' + path, o);
+  const nd = r.headers.get('x-device');
+  if (nd && who && devKeys()[who] !== nd) setDevKey(who, nd);
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && myUsername) logout();
+  if (r.status === 403 && j.blocked && myUsername) { sessionStorage.setItem('authErr', j.error || ''); logout(); }
   if (!r.ok) throw new Error(j.error || 'Gagal');
   return j;
 }
@@ -351,6 +368,9 @@ async function tick() {
     const j = await api('sync?chat=' + encodeURIComponent(active || '') + (hb ? '&hb=1' : ''));
     if (hb) lastHb = Date.now();
     if (j.v !== ver) { ver = j.v; await loadChats(); if (active) await loadMessages(); }
+    // timer hapus otomatis: pesan yang udah lewat waktunya langsung hilang dari layar
+    const cc = chats.find(x => x.id === active);
+    if (cc && cc.ttl && msgs.some(m => Date.now() - m.ts >= cc.ttl * 1000)) await loadMessages();
     if (j.chat === (active || '')) handleTyping(j.typing || []);
   } catch (e) {}
   clearTimeout(timer);
@@ -372,8 +392,13 @@ function renderSub() {
     const n = typingNames.map(nameOf);
     const t = n.length === 1 ? n[0] : n.length === 2 ? n.join(' dan ') : n.length + ' orang';
     el.innerHTML = `<span class="tp">${esc(t)} sedang mengetik<span class="dots"><i></i><i></i><i></i></span></span>`;
-  } else el.textContent = subBase;
+  } else {
+    const c = chats.find(x => x.id === active);
+    el.textContent = subBase + (c && c.ttl ? ' · ⏳ ' + TTL_LABEL[c.ttl] : '');
+  }
 }
+
+const TTL_LABEL = { 0: 'Mati', 3600: '1 jam', 86400: '24 jam', 604800: '7 hari', 2592000: '30 hari' };
 
 const unread = c => (c.id === active && !document.hidden) ? 0 : Math.max(0, c.count - (seen[c.id] ?? 0));
 
@@ -382,6 +407,7 @@ async function loadChats() {
   await ensureProfiles([...list.filter(c => c.type === 'dm').map(c => c.other), ...list.map(c => c.last && c.last.u)], true);
   chats = list;
   renderList();
+  if (active) renderSub();
 }
 
 function renderList() {
@@ -400,7 +426,7 @@ function renderList() {
 
   let html = show.map(c => {
     const u = unread(c);
-    const msgText = c.last ? (c.last.t || '🎙️ Pesan suara') : '';
+    const msgText = c.last ? (previewOf(c.last) || '🎙️ Pesan suara') : '';
     const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === myUsername ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
     
     let aHtml = c.type === 'dm' ? avUser(c.other) : (c.avatar ? `<img class="av" src="${c.avatar}">` : avText(title(c), c.id));
@@ -577,6 +603,7 @@ $('#cMenuBtn').onclick = () => {
     <button class="action-item" onclick="togglePinChat()"><span>📌</span> ${isPinned ? 'Lepas sematan chat' : 'Sematkan chat'}</button>
     <button class="action-item" onclick="toggleArchiveChat()"><span>📦</span> Arsipkan chat</button>
     <button class="action-item" onclick="toggleMuteChat()"><span>🔕</span> ${isMuted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'}</button>
+    <button class="action-item" onclick="closeActionSheetForce(); ttlModal()"><span>⏳</span> Timer hapus otomatis${c.ttl ? ' (' + TTL_LABEL[c.ttl] + ')' : ''}</button>
   `;
 
   // Menu Info Grup HANYA MUNCUL kalau itu grup, bukan DM/Bot
@@ -655,7 +682,7 @@ async function loadMessages() {
   renderList();
 }
 
-function previewOf(m) { return m.deleted ? 'Pesan dihapus' : (m.audio ? '🎙️ Pesan suara' : (m.t || '')); }
+function previewOf(m) { return m.deleted ? 'Pesan dihapus' : (m.audio ? '🎙️ Pesan suara' : (m.stk ? '🏷️ Stiker' : (m.t || ''))); }
 
 function renderMsgs() {
   const box = $('#msgs');
@@ -669,7 +696,7 @@ function renderMsgs() {
     rendered.add(key);
     const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
 
-    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
+    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
     const canDelete = mine || myUsername === 'aldev';
     const quote = m.re && !m.deleted ? `<div class="qt" onclick="jumpTo(${m.re.i})"><b>${esc(nameOf(m.re.u))}</b><span>${esc(m.re.t)}</span></div>` : '';
 
@@ -679,7 +706,7 @@ function renderMsgs() {
       ${contentHtml}
       <div class="meta">${m.edited && !m.deleted ? '<span class="edited-tag">diedit</span>' : ''}${time(m.ts)}
         ${!m.deleted ? `<button class="rb" title="Balas" onclick="startReply(${idx})">↩</button>` : ''}
-        ${!m.deleted && mine && !m.audio ? `<button class="rb" title="Edit pesan" onclick="startEdit(${idx})">✏️</button>` : ''}
+        ${!m.deleted && mine && !m.audio && !m.stk ? `<button class="rb" title="Edit pesan" onclick="startEdit(${idx})">✏️</button>` : ''}
         ${!m.deleted && canDelete ? `<button class="del-btn" title="Hapus pesan" onclick="deleteMessage(${idx})">🗑️</button>` : ''}
         ${!m.deleted ? `<button class="rb" onclick="pick(event,${idx})">☺</button>` : ''}
       </div></div>
@@ -688,6 +715,34 @@ function renderMsgs() {
   if (firstRender) box.scrollTop = box.scrollHeight;
   else if (stick || nearBottom) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
   firstRender = false; stick = false;
+}
+
+function ttlModal() {
+  const c = chats.find(x => x.id === active);
+  if (!c) return;
+  const cur = c.ttlSet === undefined ? null : c.ttlSet;
+  const opts = [[null, 'Ikuti pengaturan default'], ...Object.entries(TTL_LABEL).map(([v, l]) => [+v, l])];
+  modal(`<h3>⏳ Timer hapus otomatis <button class="ico" onclick="closeModal()">✕</button></h3>
+    <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Pesan yang lebih lama dari waktu ini otomatis hilang dari tampilan akunmu. Pesan di akun orang lain tidak ikut terhapus.</p>
+    <div style="display:flex;flex-direction:column;gap:6px">${opts.map(([v, l]) =>
+      `<button class="btn ${cur === v ? '' : 'g'}" onclick="setChatTtl(${v === null ? 'null' : v})">${cur === v ? '● ' : '○ '}${l}</button>`).join('')}</div>`);
+}
+
+async function setChatTtl(v) {
+  try {
+    await api('settings/ttl', { chat: active, ttl: v });
+    closeModal();
+    await loadChats(); await loadMessages();
+    toast('Timer diperbarui');
+  } catch (e) { toast(e.message); }
+}
+
+async function setDefaultTtl(v) {
+  try {
+    await api('settings/ttl', { chat: 'default', ttl: +v });
+    toast('Timer default diperbarui');
+    await loadChats(); if (active) await loadMessages();
+  } catch (e) { toast(e.message); }
 }
 
 function jumpTo(i) {
@@ -715,7 +770,7 @@ function startReply(idx) {
 
 function startEdit(idx) {
   const m = msgs.find(x => x.i === idx);
-  if (!m || m.deleted || m.audio || m.u !== myUsername) return;
+  if (!m || m.deleted || m.audio || m.stk || m.u !== myUsername) return;
   replyTo = null;
   editingIdx = m.i;
   showCtx('Mengedit pesan', m.t.slice(0, 80));
@@ -801,6 +856,120 @@ $('#inp').addEventListener('input', () => {
   lastTyping = n;
   api('typing', { chat: active }).catch(() => {});
 });
+
+// ---------- Stiker ----------
+const STK = { maxVid: 3, recent: [] };
+$('#stkBtn').onclick = openStickerTray;
+
+function openStickerTray() {
+  if (!active) return toast('Pilih chat dulu');
+  modal(`<h3>🏷️ Stiker <button class="ico" onclick="closeModal()">✕</button></h3>
+    <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Foto jadi stiker gambar. Video (maks ${STK.maxVid} detik) jadi stiker yang bergerak dan berulang.</p>
+    <button class="btn" style="width:100%" onclick="pickSticker()">➕ Buat stiker dari foto / video</button>
+    <div class="stk-grid" id="stkGrid"></div>
+    ${STK.recent.length ? '' : '<div style="color:var(--mu);font-size:13px;padding:14px 0 0;text-align:center">Stiker yang kamu buat di sesi ini muncul di sini</div>'}`);
+  const grid = $('#stkGrid');
+  STK.recent.forEach(x => {
+    const b = document.createElement('button');
+    b.className = 'stk-cell';
+    b.innerHTML = x.k === 'vid' ? `<video src="${x.d}" autoplay loop muted playsinline></video>` : `<img src="${x.d}" alt="">`;
+    b.onclick = () => sendSticker(x);
+    grid.appendChild(b);
+  });
+}
+
+function pickSticker() {
+  const f = document.createElement('input');
+  f.type = 'file'; f.accept = 'image/*,video/*';
+  f.onchange = async () => {
+    const file = f.files && f.files[0];
+    if (!file) return;
+    closeModal(); toast('Lagi bikin stiker...');
+    try {
+      const x = file.type.startsWith('video') ? await vidSticker(file) : await imgSticker(file);
+      STK.recent = [x, ...STK.recent].slice(0, 12);
+      await sendSticker(x);
+    } catch (e) { toast(e.message || 'Gagal bikin stiker'); }
+  };
+  f.click();
+}
+
+async function sendSticker(x) {
+  if (!active) return;
+  closeModal();
+  const chat = active, rp = replyTo;
+  clearCtx(); stick = true;
+  try {
+    await api('send', { chat, text: '', stk: x, reply: rp ? rp.i : undefined });
+    ver = ''; await loadMessages(); loadChats();
+  } catch (e) { toast(e.message); }
+}
+
+async function imgSticker(file) {
+  const im = new Image();
+  im.src = URL.createObjectURL(file);
+  try { await im.decode(); } catch (e) { throw new Error('Foto nggak bisa dibaca'); }
+  for (const size of [512, 384, 256, 192]) {
+    const sc = Math.min(1, size / Math.max(im.naturalWidth, im.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(im.naturalWidth * sc));
+    c.height = Math.max(1, Math.round(im.naturalHeight * sc));
+    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    let d = c.toDataURL('image/webp', 0.85);
+    if (!d.startsWith('data:image/webp')) d = c.toDataURL('image/png'); // Safari belum bisa encode webp
+    if (d.length <= 700000) return { k: 'img', d };
+  }
+  throw new Error('Foto terlalu rumit buat jadi stiker');
+}
+
+async function vidSticker(file) {
+  if (!window.MediaRecorder) throw new Error('Browser ini belum bisa bikin stiker video');
+  const mime = ['video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(m => MediaRecorder.isTypeSupported(m));
+  if (!mime) throw new Error('Browser ini belum bisa bikin stiker video');
+
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto';
+  v.src = URL.createObjectURL(file);
+  await new Promise((ok, no) => { v.onloadedmetadata = ok; v.onerror = () => no(new Error('Video nggak bisa dibaca')); });
+  const dur = v.duration;
+  if (!isFinite(dur) || dur <= 0) throw new Error('Video nggak bisa dibaca');
+  if (dur > STK.maxVid + 0.05) throw new Error(`Video stiker maksimal ${STK.maxVid} detik`);
+
+  const S = 384, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const s = Math.min(v.videoWidth, v.videoHeight);
+  const sx = (v.videoWidth - s) / 2, sy = (v.videoHeight - s) / 2; // crop tengah jadi kotak
+
+  // coba beberapa kualitas sampai muat di batas ukuran
+  for (const bps of [600000, 320000, 160000]) {
+    v.currentTime = 0;
+    const stream = c.captureStream(20);
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bps });
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(r => (rec.onstop = r));
+    rec.start(200);
+    await v.play();
+    await new Promise(res => {
+      const step = () => {
+        ctx.drawImage(v, sx, sy, s, s, 0, 0, S, S);
+        if (v.ended || v.currentTime >= dur - 0.04) return res();
+        requestAnimationFrame(step);
+      };
+      step();
+    });
+    ctx.drawImage(v, sx, sy, s, s, 0, 0, S, S);
+    await new Promise(r => setTimeout(r, 120));
+    rec.stop(); await stopped;
+    stream.getTracks().forEach(t => t.stop());
+
+    const blob = new Blob(chunks, { type: mime.split(';')[0] });
+    const d = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    if (d.length <= 700000) return { k: 'vid', d };
+  }
+  throw new Error('Video terlalu rumit buat jadi stiker, coba yang lebih pendek');
+}
 
 // Voice Note (VN)
 let mediaRec, audioChunks = [], isRecording = false, isCanceled = false;
@@ -901,6 +1070,7 @@ let newAv;
 $('#gear').onclick = async () => {
   newAv = undefined;
   me = await api('me');
+  const tt = await api('settings/ttl?chat=default').catch(() => ({ def: 0 }));
   const done = me.missions.every(m => m.n >= m.max);
   const notifOn = 'Notification' in window && Notification.permission === 'granted';
   modal(`<h3>Pengaturan <button class="ico" onclick="closeModal()">✕</button></h3>
@@ -910,6 +1080,9 @@ $('#gear').onclick = async () => {
   <label>Nama</label><input id="sName" maxlength="30" value="${esc(me.name)}">
   <label>Username</label><input value="@${me.username}" disabled>
   <label>Bio</label><textarea id="sBio" rows="2" maxlength="120">${esc(me.bio || '')}</textarea>
+  <label>⏳ Hapus pesan otomatis (semua chat)</label>
+  <select id="sTtl" onchange="setDefaultTtl(this.value)">${Object.entries(TTL_LABEL).map(([v, l]) => `<option value="${v}" ${+v === tt.def ? 'selected' : ''}>${l}${+v === 0 ? ' (bawaan)' : ''}</option>`).join('')}</select>
+  <div style="font-size:11px;color:var(--mu);margin-top:4px">Pesan lama hilang dari tampilan akunmu. Bisa diatur beda per chat lewat menu ⋮ di dalam chat.</div>
   <label>Notifikasi</label>
   <button class="btn g" id="nBtn" ${notifOn ? 'disabled' : ''} onclick="askNotif()">${notifOn ? 'Notifikasi aktif' : 'Aktifkan notifikasi'}</button>
   <label>Centang biru ${badge(me.username)}</label>
@@ -958,7 +1131,12 @@ async function askNotif() {
   toast(p === 'granted' ? 'Notifikasi aktif' : 'Notifikasi ditolak'); $('#nBtn').disabled = p === 'granted';
 }
 
-if (myUsername) boot().catch(() => {}); else $('#auth').classList.remove('hidden');
+if (myUsername) boot().catch(() => {});
+else {
+  $('#auth').classList.remove('hidden');
+  const pend = sessionStorage.getItem('authErr');
+  if (pend) { $('#aErr').textContent = pend; sessionStorage.removeItem('authErr'); }
+}
 </script>
 </body>
 </html>
