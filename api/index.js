@@ -16,9 +16,15 @@ const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10)
 const dmId = (a, b) => 'dm:' + [a, b].sort().join(':');
 const EMOJI = ['❤️', '😂', '👍', '😮', '🔥'];
 
+const BAD_WORDS = ['anjing', 'babi', 'kunyuk', 'bajingan', 'kontol', 'memek', 'jembut', 'goblok', 'tolol', 'bangsat'];
+
 const SYSTEM_CONFIG = {
   mainGroupId: "global",
   mainGroupName: "Global Group",
+  mainGroupAvatar: "https://files.catbox.moe/5k43y6.jpg",
+  botUsername: "albot",
+  botName: "Aldev Guard Bot",
+  botAvatar: "https://files.catbox.moe/jx4guq.jpg",
   devBadgeColor: {
     rainbow: true,
     red: false,
@@ -63,13 +69,13 @@ async function access(u, chat) {
   if (chat.startsWith('grp:')) {
     const g = await redis.get('group:' + chat.slice(4));
     if (!g || !g.members.includes(u)) return { ok: false };
-    return { ok: true, members: g.members };
+    return { ok: true, members: g.members, group: g };
   }
   return { ok: false };
 }
 
 const bump = (chat, members) =>
-  chat === 'global' ? redis.incr('ver:global') : Promise.all(members.map(m => redis.incr('ver:' + m)));
+  chat === 'global' ? redis.incr('ver:global') : Promise.all((members || []).map(m => redis.incr('ver:' + m)));
 
 async function missions(u, me) {
   const [msgs, reacts, contacts, days] = await Promise.all([
@@ -84,7 +90,25 @@ async function missions(u, me) {
   ].map(m => ({ ...m, n: Math.min(m.n, m.max) }));
 }
 
-// ---------- Masuk / Daftar Otomatis ----------
+// Ensure Bot User Exists in Database
+async function initBot() {
+  const botUser = await redis.get('user:' + SYSTEM_CONFIG.botUsername);
+  if (!botUser) {
+    await redis.set('user:' + SYSTEM_CONFIG.botUsername, {
+      username: SYSTEM_CONFIG.botUsername,
+      name: SYSTEM_CONFIG.botName,
+      bio: 'Bot Resmi Penjaga Grup Aldev',
+      av: SYSTEM_CONFIG.botAvatar,
+      verified: true,
+      isBot: true,
+      created: Date.now()
+    });
+    await redis.sadd('users', SYSTEM_CONFIG.botUsername);
+  }
+}
+initBot();
+
+// ---------- Auth / Profile ----------
 app.post('/api/register', h(async (req, res) => {
   const username = clean(req.body.username);
   const name = String(req.body.name || '').trim().slice(0, 30);
@@ -110,7 +134,6 @@ app.get('/api/me', auth, h(async (req, res) => {
   if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan' });
   if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
   
-  // Update heartbeat online
   await redis.set('online:' + req.u, Date.now(), { ex: 30 });
   await redis.sadd('days:' + req.u, today());
 
@@ -128,7 +151,7 @@ app.post('/api/me', auth, h(async (req, res) => {
   const a = req.body.avatar;
   if (a === '') { await redis.del('av:' + req.u); me.av = 0; }
   else if (typeof a === 'string') {
-    if (!/^data:image\/(jpeg|png|webp);base64,/.test(a) || a.length > 300000) return res.status(400).json({ error: 'Foto kegedean' });
+    if (!a.startsWith('http') && (!/^data:image\/(jpeg|png|webp);base64,/.test(a) || a.length > 300000)) return res.status(400).json({ error: 'Foto kegedean' });
     await redis.set('av:' + req.u, a);
     me.av = Date.now();
   }
@@ -146,7 +169,10 @@ app.post('/api/verify', auth, h(async (req, res) => {
 }));
 
 app.get('/api/avatar/:u', h(async (req, res) => {
-  const a = await redis.get('av:' + clean(req.params.u));
+  const u = clean(req.params.u);
+  if (u === SYSTEM_CONFIG.botUsername) return res.redirect(SYSTEM_CONFIG.botAvatar);
+  const a = await redis.get('av:' + u);
+  if (typeof a === 'string' && a.startsWith('http')) return res.redirect(a);
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(a || '');
   if (!m) return res.status(404).end();
   res.set('Content-Type', m[1]).set('Cache-Control', 'public,max-age=300').send(Buffer.from(m[2], 'base64'));
@@ -164,11 +190,11 @@ app.post('/api/profiles', auth, h(async (req, res) => {
       if (r) {
         out[u] = { 
           name: r.name, 
-          v: !!r.verified || u === 'aldev', 
+          v: !!r.verified || u === 'aldev' || u === SYSTEM_CONFIG.botUsername, 
           badgeColor: u === 'aldev' ? devBadge : 'blue',
-          a: r.av || 0, 
+          a: r.av || (u === SYSTEM_CONFIG.botUsername ? SYSTEM_CONFIG.botAvatar : 0), 
           bio: r.bio,
-          online: !!onlineKeys[i]
+          online: u === SYSTEM_CONFIG.botUsername ? true : !!onlineKeys[i]
         }; 
       }
     });
@@ -176,15 +202,16 @@ app.post('/api/profiles', auth, h(async (req, res) => {
   res.json(out);
 }));
 
-// API Anggota Grup / Global Detail
 app.get('/api/group-members', auth, h(async (req, res) => {
   const chat = String(req.query.chat || '');
   let usernames = [];
+  let groupData = null;
+
   if (chat === 'global') {
     usernames = await redis.smembers('users');
   } else if (chat.startsWith('grp:')) {
-    const g = await redis.get('group:' + chat.slice(4));
-    if (g) usernames = g.members;
+    groupData = await redis.get('group:' + chat.slice(4));
+    if (groupData) usernames = groupData.members;
   } else if (chat.startsWith('dm:')) {
     usernames = chat.slice(3).split(':');
   }
@@ -196,15 +223,19 @@ app.get('/api/group-members', auth, h(async (req, res) => {
   let onlineCount = 0;
   const list = usernames.map((u, i) => {
     const r = rows[i] || { name: u, username: u };
-    const isOnline = !!onlineKeys[i];
+    const isOnline = u === SYSTEM_CONFIG.botUsername ? true : !!onlineKeys[i];
     if (isOnline) onlineCount++;
+    const isOwner = groupData ? groupData.owner === u : u === 'aldev';
+    const isAdmin = groupData ? (groupData.admins || [groupData.owner]).includes(u) : true;
+
     return {
       username: u,
       name: r.name || u,
-      v: !!r.verified || u === 'aldev',
+      v: !!r.verified || u === 'aldev' || u === SYSTEM_CONFIG.botUsername,
       badgeColor: u === 'aldev' ? devBadge : 'blue',
-      a: r.av || 0,
-      online: isOnline
+      a: r.av || (u === SYSTEM_CONFIG.botUsername ? SYSTEM_CONFIG.botAvatar : 0),
+      online: isOnline,
+      role: isOwner ? 'owner' : isAdmin ? 'admin' : 'member'
     };
   });
 
@@ -221,9 +252,9 @@ app.get('/api/users', auth, h(async (req, res) => {
     .map(r => ({ 
       username: r.username, 
       name: r.name, 
-      v: !!r.verified || r.username === 'aldev', 
+      v: !!r.verified || r.username === 'aldev' || r.username === SYSTEM_CONFIG.botUsername, 
       badgeColor: r.username === 'aldev' ? devBadge : 'blue',
-      a: r.av || 0 
+      a: r.av || (r.username === SYSTEM_CONFIG.botUsername ? SYSTEM_CONFIG.botAvatar : 0)
     }));
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
 }));
@@ -247,14 +278,14 @@ app.get('/api/chats', auth, h(async (req, res) => {
   const r = await p.exec();
   const out = uniqueIds.map((id, i) => {
     const count = r[i * 2], last = r[i * 2 + 1];
-    if (id === 'global') return { id, type: 'global', title: SYSTEM_CONFIG.mainGroupName, count, last, verified: true };
+    if (id === 'global') return { id, type: 'global', title: SYSTEM_CONFIG.mainGroupName, avatar: SYSTEM_CONFIG.mainGroupAvatar, count, last, verified: true };
     if (id.startsWith('dm:')) {
       const other = id.slice(3).split(':').find(x => x !== u);
       return { id, type: 'dm', title: other, other, count, last };
     }
     const g = gm[id];
     if (!g) return null;
-    return { id, type: 'group', title: g.name, code: g.id, members: g.members.length, count, last };
+    return { id, type: 'group', title: g.name, avatar: g.avatar || null, code: g.id, members: g.members.length, count, last };
   }).filter(Boolean);
   res.json(out);
 }));
@@ -275,6 +306,7 @@ app.get('/api/messages', auth, h(async (req, res) => {
   res.json({ start, msgs: len ? msgs.slice(start) : [] });
 }));
 
+// ---------- Kirim Pesan & Logika Bot Penjaga Grup ----------
 app.post('/api/send', auth, h(async (req, res) => {
   const chat = String(req.body.chat || '');
   const text = String(req.body.text || '').trim().slice(0, 2000);
@@ -283,6 +315,53 @@ app.post('/api/send', auth, h(async (req, res) => {
 
   const acc = await access(req.u, chat);
   if (!acc.ok) return res.status(403).json({ error: 'Tidak boleh kirim pesan' });
+
+  // 1. Respon Otomatis Bot jika di Chat Privat (DM)
+  if (chat.startsWith('dm:')) {
+    const other = chat.slice(3).split(':').find(x => x !== req.u);
+    if (other === SYSTEM_CONFIG.botUsername) {
+      const msgObj = { u: req.u, t: text, audio: audio, ts: Date.now(), r: {} };
+      await redis.rpush('c:' + chat, msgObj);
+      
+      const botReply = {
+        u: SYSTEM_CONFIG.botUsername,
+        t: "Hi! Saya bot untuk jaga grup 🤖🛡️\n\nSilahkan gunakan saya di grup anda, masukkan saja saya ke dalam grup sebagai anggota / admin!",
+        ts: Date.now() + 100,
+        r: {}
+      };
+      await redis.rpush('c:' + chat, botReply);
+      await bump(chat, acc.members);
+      return res.json({ ok: 1 });
+    }
+  }
+
+  // 2. Proteksi Anti-Link & Anti-Toxic Bot di Grup
+  let botSettings = { antilink: true, antitoxic: true };
+  if (chat.startsWith('grp:')) {
+    const s = await redis.get('botconfig:' + chat.slice(4));
+    if (s) botSettings = s;
+  }
+
+  if (text) {
+    // Cek Anti-Link
+    if (botSettings.antilink && (text.includes('http://') || text.includes('https://') || text.includes('www.') || text.includes('.com') || text.includes('.id'))) {
+      const warnMsg = { u: SYSTEM_CONFIG.botUsername, t: `⚠️ @${req.u} dilarang mengirim link promosi di grup ini! (Pesan dihapus otomatis oleh Bot)`, ts: Date.now(), r: {} };
+      await redis.rpush('c:' + chat, warnMsg);
+      await bump(chat, acc.members || []);
+      return res.json({ ok: 1, blocked: 'link' });
+    }
+
+    // Cek Anti-Toxic
+    if (botSettings.antitoxic) {
+      const lower = text.toLowerCase();
+      if (BAD_WORDS.some(w => lower.includes(w))) {
+        const warnMsg = { u: SYSTEM_CONFIG.botUsername, t: `🚫 @${req.u} Tolong jaga ketikan kamu, dilarang berkata kasar/toxic! (Pesan dihapus oleh Bot)`, ts: Date.now(), r: {} };
+        await redis.rpush('c:' + chat, warnMsg);
+        await bump(chat, acc.members || []);
+        return res.json({ ok: 1, blocked: 'toxic' });
+      }
+    }
+  }
 
   const msgObj = { u: req.u, t: text, audio: audio, ts: Date.now(), r: {} };
   await redis.rpush('c:' + chat, msgObj);
@@ -347,33 +426,69 @@ app.get('/api/settings/ttl', auth, h(async (req, res) => {
   res.json({ ttl: parseInt(ttl, 10) });
 }));
 
+// ---------- Management Grup, Admin, & Kick/Add ----------
 app.post('/api/groups', auth, h(async (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 30);
   if (!name) return res.status(400).json({ error: 'Nama grup wajib diisi' });
   const id = crypto.randomBytes(4).toString('hex');
-  await redis.set('group:' + id, { id, name, owner: req.u, members: [req.u], isPrivate: true });
+  // Otomatis masukkan pembuat grup & bot
+  const groupObj = {
+    id,
+    name,
+    avatar: null,
+    owner: req.u,
+    admins: [req.u, SYSTEM_CONFIG.botUsername],
+    members: [req.u, SYSTEM_CONFIG.botUsername],
+    isPrivate: true
+  };
+  await redis.set('group:' + id, groupObj);
   await redis.sadd('uchats:' + req.u, 'grp:' + id);
   res.json({ id: 'grp:' + id });
 }));
 
 app.post('/api/groups/update', auth, h(async (req, res) => {
-  const { code, name, action } = req.body;
+  const { code, name, avatar, action, targetUser } = req.body;
   if (code === SYSTEM_CONFIG.mainGroupId || code === 'global') {
     return res.status(403).json({ error: 'Grup utama dikunci dan tidak bisa diubah/dihapus!' });
   }
   const g = await redis.get('group:' + code);
   if (!g) return res.status(404).json({ error: 'Grup tidak ditemukan' });
-  if (g.owner !== req.u) return res.status(403).json({ error: 'Hanya pemilik grup yang bisa mengubah' });
+  
+  const isOwner = g.owner === req.u || req.u === 'aldev';
+  const isAdmin = (g.admins || [g.owner]).includes(req.u) || isOwner;
+
+  if (!isAdmin) return res.status(403).json({ error: 'Hanya Admin atau Owner grup yang memiliki akses!' });
 
   if (action === 'delete') {
+    if (!isOwner) return res.status(403).json({ error: 'Hanya Owner yang bisa menghapus grup!' });
     await redis.del('group:' + code);
     return res.json({ ok: 1 });
   }
-  if (name) {
-    g.name = String(name).trim().slice(0, 30);
+
+  if (action === 'kick' && targetUser) {
+    if (targetUser === g.owner) return res.status(400).json({ error: 'Owner grup tidak dapat dikeluarkkan!' });
+    g.members = g.members.filter(m => m !== targetUser);
+    g.admins = (g.admins || []).filter(a => a !== targetUser);
+    await redis.set('group:' + code, g);
+    await redis.srem('uchats:' + targetUser, 'grp:' + code);
+    await bump('grp:' + code, g.members);
+    return res.json({ ok: 1 });
+  }
+
+  if (action === 'promote' && targetUser) {
+    if (!isOwner) return res.status(403).json({ error: 'Hanya Owner yang bisa menaikkan Admin!' });
+    g.admins = g.admins || [];
+    if (!g.admins.includes(targetUser)) g.admins.push(targetUser);
     await redis.set('group:' + code, g);
     await bump('grp:' + code, g.members);
+    return res.json({ ok: 1 });
   }
+
+  if (name) g.name = String(name).trim().slice(0, 30);
+  if (avatar !== undefined) g.avatar = avatar;
+
+  await redis.set('group:' + code, g);
+  await bump('grp:' + code, g.members);
   res.json({ ok: 1 });
 }));
 
