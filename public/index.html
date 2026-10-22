@@ -15,14 +15,12 @@ button{cursor:pointer;border:0;background:none;touch-action:manipulation}
 .av{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;font-weight:600;color:#fff}
 .av.s{width:36px;height:36px;font-size:14px}
 
-/* STYLING BADGE EFEK WARNA-WARNI KHUSUS */
 .bl{width:15px;height:15px;vertical-align:-2px;margin-left:4px}
 .bl.red circle{fill:#ff4757!important}
 .bl.orange circle{fill:#ffa502!important}
 .bl.yellow circle{fill:#eccc68!important}
 .bl.blue circle{fill:#2f81f7!important}
 
-/* Animasi Rainbow Neon khusus Developer */
 @keyframes rainbowGlow {
   0% { fill: #ff0055; filter: drop-shadow(0 0 2px #ff0055); }
   20% { fill: #ff9900; filter: drop-shadow(0 0 2px #ff9900); }
@@ -169,7 +167,6 @@ const fmt = s => esc(s)
   .replace(/\|\|([^|\n]+)\|\|/g, '<span class="sp" onclick="this.classList.toggle(\'on\')">$1</span>')
   .replace(/\n/g, '<br>');
 
-// Render SVG Badge dengan Pilihan Warna
 const getBadgeSvg = (color = 'blue') => `<svg class="bl ${color}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#2f81f7"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 const nameOf = u => (prof[u] && prof[u].name) || u;
@@ -340,7 +337,7 @@ async function openChat(id) {
   
   $('#cName').innerHTML = esc(t) + headerBadge;
   $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
-  $('#cSub').textContent = !c ? '' : c.type === 'dm' ? '@' + c.other : c.type === 'group' ? c.members + ' anggota · kode ' + c.code : 'Grup resmi terverifikasi';
+  $('#cSub').textContent = !c ? '' : c.type === 'dm' ? '@' + c.other : c.type === 'group' ? c.members + ' anggota · kode ' + c.code : 'Grup publik resmi terverifikasi';
   $('#cSettings').classList.remove('hidden');
   $('#msgs').innerHTML = '';
   renderList();
@@ -358,9 +355,9 @@ $('#cSettings').onclick = async () => {
 
   let html = `<h3>Pengaturan Chat <button class="ico" onclick="closeModal()">✕</button></h3>`;
   if (c.type === 'group' || c.type === 'global') {
-    html += `<label>Kode Undangan Grup (Privat)</label>
+    html += `<label>Kode Undangan Grup</label>
     <div class="code"><span>${c.code || 'global-official'}</span><button class="btn" onclick="copy('${c.code || 'global'}')">Salin Kode</button></div>
-    <p style="color:var(--mu);font-size:12px;margin-top:4px">Grup tidak publik. Orang lain hanya bisa masuk via kode ini.</p>`;
+    <p style="color:var(--mu);font-size:12px;margin-top:4px">${c.type === 'global' ? 'Grup publik utama.' : 'Grup privat. Orang lain masuk via kode ini.'}</p>`;
   }
   if (c.type === 'group' && c.id !== 'global') {
     html += `<label>Ubah Nama Grup</label><input id="modGroupName" value="${esc(c.title)}" maxlength="30">
