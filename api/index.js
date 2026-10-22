@@ -47,11 +47,69 @@ const h = fn => (req, res) =>
     res.status(500).json({ error: 'Server lagi error, coba lagi' });
   });
 
-function auth(req, res, next) {
-  const u = clean(req.get('x-user'));
-  if (!u) return res.status(401).json({ error: 'Belum login' });
-  req.u = u;
-  next();
+// ---------- Akun dikunci ke IP pembuatnya ----------
+// Kalau IP beda DAN perangkatnya bukan perangkat yang dulu dipakai bikin akun -> ditolak.
+// Kunci perangkat (x-device) dipakai biar pemilik akun nggak ke-lock sendiri waktu IP HP-nya
+// ganti (data seluler / pindah wifi). Orang lain nggak punya kunci itu.
+const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000]; // mati, 1 jam, 24 jam, 7 hari, 30 hari
+const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
+const BLOCK_MSG = 'Username sudah digunakan, gunakan username lain';
+const bindCache = new Map();
+
+function ipOf(req) {
+  let ip = req.get('x-vercel-forwarded-for') || req.get('x-real-ip') || req.get('x-forwarded-for') || (req.socket && req.socket.remoteAddress) || '';
+  ip = String(ip).split(',')[0].trim().replace(/^::ffff:/, '');
+  // IPv6: HP sering ganti bagian belakangnya, jadi yang dibandingin 64 bit depan aja
+  if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':');
+  return ip;
+}
+const cacheBind = (u, b) => bindCache.set(u, { b, exp: Date.now() + 60000 });
+async function getBind(u) {
+  const c = bindCache.get(u);
+  if (c && c.exp > Date.now()) return c.b;
+  const b = await redis.get('bind:' + u);
+  if (b) cacheBind(u, b);
+  return b;
+}
+async function forceBind(u, req) {
+  const b = { ip: ipOf(req), dev: crypto.randomBytes(12).toString('hex'), t: Date.now() };
+  await redis.set('bind:' + u, b);
+  cacheBind(u, b);
+  return { ok: true, dev: b.dev };
+}
+// -> { ok:true, dev } | { ok:false, nouser?:true }
+async function checkBind(u, req) {
+  const ip = ipOf(req), dev = String(req.get('x-device') || '');
+  let b = await getBind(u);
+  if (!b) {
+    // akun lama (dibuat sebelum fitur ini) terikat ke perangkat pertama yang membukanya
+    if (!(await redis.exists('user:' + u))) return { ok: false, nouser: true };
+    const nb = { ip, dev: crypto.randomBytes(12).toString('hex'), t: Date.now() };
+    if (await redis.setnx('bind:' + u, nb)) { cacheBind(u, nb); return { ok: true, dev: nb.dev }; }
+    b = await redis.get('bind:' + u);
+    if (!b) return { ok: false };
+  }
+  const sameIp = !!ip && b.ip === ip;
+  const sameDev = !!dev && dev === b.dev;
+  if (!sameIp && !sameDev) return { ok: false };
+  if (!sameIp) { b.ip = ip; await redis.set('bind:' + u, b); cacheBind(u, b); } // perangkat sama, IP baru -> IP baru dipercaya
+  return { ok: true, dev: b.dev };
+}
+
+async function auth(req, res, next) {
+  try {
+    const u = clean(req.get('x-user'));
+    if (!u) return res.status(401).json({ error: 'Belum login' });
+    const r = await checkBind(u, req);
+    if (r.nouser) return res.status(401).json({ error: 'Akun tidak ditemukan' });
+    if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
+    res.set('x-device', r.dev);
+    req.u = u;
+    next();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server lagi error, coba lagi' });
+  }
 }
 
 async function access(u, chat) {
@@ -103,7 +161,12 @@ app.post('/api/register', h(async (req, res) => {
   if (username.length < 3) return res.status(400).json({ error: 'Username minimal 3 karakter' });
 
   const existingUser = await redis.get('user:' + username);
-  if (existingUser) return res.json({ username: existingUser.username });
+  if (existingUser) {
+    const r = await checkBind(username, req);
+    if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
+    res.set('x-device', r.dev);
+    return res.json({ username: existingUser.username });
+  }
 
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
 
@@ -114,6 +177,8 @@ app.post('/api/register', h(async (req, res) => {
   await redis.sadd('users', username);
   await redis.sadd('uchats:' + username, 'global');
 
+  const bound = await forceBind(username, req);
+  res.set('x-device', bound.dev);
   res.json({ username });
 }));
 
@@ -311,6 +376,18 @@ app.get('/api/chats', auth, h(async (req, res) => {
       c.last = [...tail].reverse().find(m => m && m.u !== LEGACY_BOT) || null;
     }
   }));
+  // timer hapus otomatis per chat (kalau belum diatur, ikut default)
+  const ttlVals = await redis.mget(...uniqueIds.map(i => ttlKey(u, i)), ttlKey(u, 'default'));
+  const defTtl = parseInt(ttlVals[ttlVals.length - 1] || 0, 10) || 0;
+  const setBy = {};
+  uniqueIds.forEach((id, i) => (setBy[id] = ttlVals[i]));
+  const now = Date.now();
+  out.forEach(c => {
+    const spec = setBy[c.id];
+    c.ttlSet = spec == null ? null : (parseInt(spec, 10) || 0);
+    c.ttl = c.ttlSet === null ? defTtl : c.ttlSet;
+    if (c.ttl > 0 && c.last && now - c.last.ts >= c.ttl * 1000) c.last = null;
+  });
   res.json(out);
 }));
 
@@ -318,8 +395,11 @@ app.get('/api/messages', auth, h(async (req, res) => {
   const chat = String(req.query.chat || '');
   if (!(await access(req.u, chat)).ok) return res.status(403).json({ error: 'Akses ditolak' });
 
-  const [ttlRaw, total] = await Promise.all([redis.get('setting:ttl:' + req.u + ':' + chat), redis.llen('c:' + chat)]);
-  const ttl = parseInt(ttlRaw || 0, 10);
+  const [ttlVals, total] = await Promise.all([
+    redis.mget(ttlKey(req.u, chat), ttlKey(req.u, 'default')),
+    redis.llen('c:' + chat),
+  ]);
+  const ttl = parseInt(ttlVals[0] ?? ttlVals[1] ?? 0, 10) || 0;
   const now = Date.now();
   const start = Math.max(0, total - 200);
   const raw = total ? await redis.lrange('c:' + chat, start, -1) : [];
@@ -337,19 +417,30 @@ app.post('/api/send', auth, h(async (req, res) => {
   const chat = String(req.body.chat || '');
   const text = String(req.body.text || '').trim().slice(0, 2000);
   const audio = req.body.audio || null;
-  if (!text && !audio) return res.status(400).json({ error: 'Pesan kosong' });
+  // stiker: gambar (webp/png) atau video pendek (webm/mp4), dibatasi ukurannya
+  let stkObj = null;
+  if (req.body.stk && typeof req.body.stk === 'object') {
+    const d = String(req.body.stk.d || '');
+    const ok = d.length <= 700000 && (
+      (req.body.stk.k === 'img' && /^data:image\/(webp|png);base64,/.test(d)) ||
+      (req.body.stk.k === 'vid' && /^data:video\/(webm|mp4)[;,]/.test(d)));
+    if (!ok) return res.status(400).json({ error: 'Stiker tidak valid atau kegedean' });
+    stkObj = { k: req.body.stk.k, d };
+  }
+  if (!text && !audio && !stkObj) return res.status(400).json({ error: 'Pesan kosong' });
 
   const acc = await access(req.u, chat);
   if (!acc.ok) return res.status(403).json({ error: 'Tidak boleh kirim pesan' });
 
   const msgObj = { u: req.u, t: text, audio: audio, ts: Date.now(), r: {} };
+  if (stkObj) msgObj.stk = stkObj;
 
   // balas pesan: isi kutipan diambil dari database biar nggak bisa dipalsuin
   if (req.body.reply != null) {
     const ri = parseInt(req.body.reply, 10);
     if (ri >= 0) {
       const o = await redis.lindex('c:' + chat, ri);
-      if (o && !o.deleted) msgObj.re = { u: o.u, i: ri, t: String(o.audio ? '🎙️ Pesan suara' : o.t || '').slice(0, 80) };
+      if (o && !o.deleted) msgObj.re = { u: o.u, i: ri, t: String(o.audio ? '🎙️ Pesan suara' : o.stk ? '🏷️ Stiker' : o.t || '').slice(0, 80) };
     }
   }
 
@@ -358,6 +449,7 @@ app.post('/api/send', auth, h(async (req, res) => {
     redis.incr('msgs:' + req.u),
     bump(chat, acc.members || []),
     redis.zrem('typing:' + chat, req.u),
+    redis.sadd('allchats', chat),
     ...(chat.startsWith('dm:') ? acc.members.map(m => redis.sadd('uchats:' + m, chat)) : []),
   ]);
   res.json({ ok: 1 });
@@ -394,7 +486,7 @@ app.post('/api/edit-message', auth, h(async (req, res) => {
   const m = await redis.lindex('c:' + chat, idx);
   if (!m || m.deleted) return res.status(404).json({ error: 'Pesan tidak ditemukan' });
   if (m.u !== req.u) return res.status(403).json({ error: 'Kamu hanya bisa mengedit pesan milikmu sendiri' });
-  if (m.audio) return res.status(400).json({ error: 'Voice note tidak bisa diedit' });
+  if (m.audio || m.stk) return res.status(400).json({ error: 'Voice note dan stiker tidak bisa diedit' });
   m.t = text;
   m.edited = true;
   await redis.lset('c:' + chat, idx, m);
@@ -422,15 +514,26 @@ app.post('/api/react', auth, h(async (req, res) => {
 }));
 
 app.post('/api/settings/ttl', auth, h(async (req, res) => {
-  const { chat, ttl } = req.body;
-  await redis.set('setting:ttl:' + req.u + ':' + chat, ttl || 0);
+  const chat = String(req.body.chat || '');
+  if (chat !== 'default' && !(await access(req.u, chat)).ok) return res.status(403).json({ error: 'Akses ditolak' });
+  // ttl: null / 'default' = ikut pengaturan default (cuma buat chat tertentu)
+  if (req.body.ttl === null || req.body.ttl === 'default') {
+    if (chat === 'default') return res.status(400).json({ error: 'Pilihan tidak valid' });
+    await redis.del(ttlKey(req.u, chat));
+    return res.json({ ok: 1 });
+  }
+  const ttl = parseInt(req.body.ttl, 10) || 0;
+  if (!TTL_OPTIONS.includes(ttl)) return res.status(400).json({ error: 'Pilihan timer tidak valid' });
+  await redis.set(ttlKey(req.u, chat), ttl);
   res.json({ ok: 1 });
 }));
 
 app.get('/api/settings/ttl', auth, h(async (req, res) => {
-  const chat = req.query.chat || '';
-  const ttl = await redis.get('setting:ttl:' + req.u + ':' + chat) || 0;
-  res.json({ ttl: parseInt(ttl, 10) });
+  const chat = String(req.query.chat || 'default');
+  const [c, d] = await redis.mget(ttlKey(req.u, chat), ttlKey(req.u, 'default'));
+  const def = parseInt(d || 0, 10) || 0;
+  const chatTtl = chat === 'default' ? def : (c == null ? null : parseInt(c, 10) || 0);
+  res.json({ ttl: chatTtl === null ? def : chatTtl, chatTtl, def });
 }));
 
 // ---------- Management Grup, Admin, & Kick/Add ----------
@@ -539,6 +642,48 @@ app.post('/api/dm', auth, h(async (req, res) => {
   await redis.sadd('contacts:' + req.u, other);
   if (!req.body.save) await redis.sadd('uchats:' + req.u, id);
   res.json({ id });
+}));
+
+// ---------- Pembersihan mingguan (Vercel Cron) ----------
+// Hapus pesan yang umurnya lebih dari 7 hari di semua chat biar database nggak jebol.
+// Dijadwalkan di vercel.json. Butuh env CRON_SECRET (Vercel ngirim otomatis).
+app.get('/api/cron/cleanup', h(async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.get('authorization') !== 'Bearer ' + secret) return res.status(401).end();
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+
+  const chats = new Set(['global', ...(await redis.smembers('allchats'))]);
+  const users = await redis.smembers('users');
+  for (let i = 0; i < users.length; i += 50) {
+    const sets = await Promise.all(users.slice(i, i + 50).map(u => redis.smembers('uchats:' + u)));
+    sets.forEach(st => st.forEach(c => chats.add(c)));
+  }
+
+  let trimmed = 0, removed = 0;
+  for (const chat of chats) {
+    const all = await redis.lrange('c:' + chat, 0, -1);
+    if (!all || !all.length) continue;
+    let members = null;
+    if (chat.startsWith('dm:')) members = chat.slice(3).split(':');
+    if (chat.startsWith('grp:')) {
+      const g = await redis.get('group:' + chat.slice(4));
+      if (!g) { // grup sudah dihapus: sisa pesannya ikut dibuang
+        await Promise.all([redis.del('c:' + chat), redis.srem('allchats', chat)]);
+        continue;
+      }
+      members = g.members;
+    }
+
+    const keep = all.filter(m => m && m.ts >= cutoff);
+    if (keep.length === all.length) continue;
+
+    removed += all.length - keep.length;
+    trimmed++;
+    await redis.del('c:' + chat);
+    for (let i = 0; i < keep.length; i += 50) await redis.rpush('c:' + chat, ...keep.slice(i, i + 50));
+    await bump(chat, members || []);
+  }
+  res.json({ ok: 1, chats: trimmed, removed });
 }));
 
 if (require.main === module) {
