@@ -75,15 +75,12 @@ app.post('/api/register', h(async (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 30);
   if (username.length < 3) return res.status(400).json({ error: 'Username minimal 3 karakter' });
 
-  // Cek apakah akun sudah pernah dibuat
   const existingUser = await redis.get('user:' + username);
 
   if (existingUser) {
-    // Kalau akun sudah ada di database, langsung izinkan masuk (Auto-login)
     return res.json({ username: existingUser.username });
   }
 
-  // Kalau akun belum ada, wajib isi nama
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
 
   const isAldev = username === 'aldev';
@@ -92,7 +89,7 @@ app.post('/api/register', h(async (req, res) => {
     name,
     bio: '',
     av: 0,
-    verified: isAldev ? true : false, // Auto centang biru khusus @aldev
+    verified: isAldev ? true : false,
     created: Date.now()
   };
 
@@ -164,7 +161,7 @@ app.get('/api/users', auth, h(async (req, res) => {
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
 }));
 
-// ---------- Chat & Auto-Delete Timer ----------
+// ---------- Chat, Hapus Pesan, & Auto-Delete Timer ----------
 app.get('/api/sync', auth, h(async (req, res) => {
   const [a, b] = await redis.mget('ver:' + req.u, 'ver:global');
   res.json({ v: (a || 0) + '.' + (b || 0) });
@@ -202,8 +199,9 @@ app.get('/api/messages', auth, h(async (req, res) => {
   const now = Date.now();
   let msgs = await redis.lrange('c:' + chat, 0, -1);
   if (ttl > 0) {
-    msgs = msgs.filter(m => (now - m.ts) < ttl * 1000);
+    msgs = msgs.filter(m => m && (now - m.ts) < ttl * 1000);
   }
+  msgs = msgs.filter(Boolean);
   const len = msgs.length;
   const start = Math.max(0, len - 100);
   res.json({ start, msgs: len ? msgs.slice(start) : [] });
@@ -228,6 +226,30 @@ app.post('/api/send', auth, h(async (req, res) => {
   res.json({ ok: 1 });
 }));
 
+// ENDPOINT HAPUS PESAN SESEORANG (TERMASUK VN)
+app.post('/api/delete-message', auth, h(async (req, res) => {
+  const { chat, idx } = req.body;
+  const u = req.u;
+  const acc = await access(u, chat);
+  if (!acc.ok || !(idx >= 0)) return res.status(400).json({ error: 'Gagal menghapus' });
+
+  const m = await redis.lindex('c:' + chat, idx);
+  if (!m) return res.status(404).json({ error: 'Pesan tidak ditemukan' });
+  
+  if (m.u !== u && u !== 'aldev') {
+    return res.status(403).json({ error: 'Kamu hanya bisa menghapus pesan milikmu sendiri' });
+  }
+
+  // Tandai pesan terhapus
+  m.t = '🚮 Pesan ini telah dihapus';
+  delete m.audio;
+  m.deleted = true;
+  
+  await redis.lset('c:' + chat, idx, m);
+  await bump(chat, acc.members);
+  res.json({ ok: 1 });
+}));
+
 app.post('/api/react', auth, h(async (req, res) => {
   const { chat, emoji } = req.body;
   const idx = parseInt(req.body.idx, 10);
@@ -235,7 +257,7 @@ app.post('/api/react', auth, h(async (req, res) => {
   const acc = await access(u, chat);
   if (!acc.ok || !EMOJI.includes(emoji) || !(idx >= 0)) return res.status(400).json({ error: 'Gagal' });
   const m = await redis.lindex('c:' + chat, idx);
-  if (!m) return res.status(404).json({ error: 'Pesan tidak ada' });
+  if (!m || m.deleted) return res.status(404).json({ error: 'Pesan tidak ada atau terhapus' });
   m.r = m.r || {};
   const arr = m.r[emoji] || [];
   const i = arr.indexOf(u);
