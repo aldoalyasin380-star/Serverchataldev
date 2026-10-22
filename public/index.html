@@ -18,7 +18,6 @@ html,body{
   overflow:hidden;
 }
 
-/* Kunci ukuran selebar layar HP */
 .app-container {
   width: 100%;
   height: 100dvh;
@@ -42,16 +41,6 @@ button{cursor:pointer;border:0;background:none;touch-action:manipulation}
 .bl.yellow circle{fill:#eccc68!important}
 .bl.blue circle{fill:#2f81f7!important}
 
-@keyframes rainbowGlow {
-  0% { fill: #ff0055; filter: drop-shadow(0 0 2px #ff0055); }
-  20% { fill: #ff9900; filter: drop-shadow(0 0 2px #ff9900); }
-  40% { fill: #33cc33; filter: drop-shadow(0 0 2px #33cc33); }
-  60% { fill: #00ccff; filter: drop-shadow(0 0 2px #00ccff); }
-  80% { fill: #9933ff; filter: drop-shadow(0 0 2px #9933ff); }
-  100% { fill: #ff0055; filter: drop-shadow(0 0 2px #ff0055); }
-}
-.bl.rainbow circle { animation: rainbowGlow 2.5s infinite linear; }
-
 input,textarea{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;outline:none}
 input:focus,textarea:focus{border-color:var(--ac)}
 .btn{background:var(--ac);color:#06281b;font-weight:600;padding:10px 16px;border-radius:10px}
@@ -59,7 +48,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .btn.danger{background:#ff6b6b;color:#fff}
 .btn:disabled{opacity:.4}
 
-/* WA Channel Link */
 .wa-channel-btn{
   display:flex;align-items:center;gap:8px;padding:9px 12px;margin:8px 12px 2px;
   background:#25d36618;border:1px solid #25d36655;border-radius:10px;
@@ -67,14 +55,12 @@ input:focus,textarea:focus{border-color:var(--ac)}
 }
 .wa-channel-btn:active{background:#25d36633}
 
-/* Auth (Login via Username) */
 .auth{min-height:100%;display:grid;place-items:center;padding:20px;width:100%}
 .card{width:100%;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
 .card h1{font-size:20px;margin-bottom:4px}.card p{color:var(--mu);font-size:12px;margin-bottom:12px}
 .card label{display:block;font-size:11px;color:var(--mu);margin:8px 0 4px}
 .err{color:#ff6b6b;font-size:12px;min-height:16px;margin:8px 0 2px}
 
-/* App Layout */
 .app{display:flex;flex-direction:column;height:100%;position:relative}
 .side{display:flex;flex-direction:column;height:100%;position:relative;background:var(--bg)}
 .mebar{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line)}
@@ -94,7 +80,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .pinned-tag{font-size:11px;color:var(--ac);margin-right:4px}
 .fab{position:absolute;right:16px;bottom:20px;width:50px;height:50px;border-radius:14px;background:var(--ac);color:#06281b;font-size:24px;box-shadow:0 6px 16px #0008;z-index:10;display:grid;place-items:center}
 
-/* Chat Screen Overlay */
 #chat{position:absolute;inset:0;background:var(--bg);z-index:20;display:flex;flex-direction:column}
 .ch{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--bg)}
 .ch .nm{flex:1;min-width:0;cursor:pointer}
@@ -118,11 +103,9 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .comp .btn{border-radius:20px;padding:0 14px;height:36px;font-size:13px}
 .hint{font-size:11px;color:var(--mu);text-align:center;padding:0 10px 4px}
 
-/* Search in Chat */
 .chat-search-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 .chat-search-bar input{border-radius:8px;padding:6px 10px;font-size:12.5px}
 
-/* Modal & Action Sheet */
 .modal{position:absolute;inset:0;background:#000a;display:grid;place-items:center;padding:16px;z-index:40;overflow:auto}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:360px;padding:16px;max-height:92dvh;overflow:auto}
 .box h3{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-size:16px}
@@ -147,7 +130,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
 <body>
 
 <div class="app-container">
-  <!-- AUTH SCREEN -->
   <div id="auth" class="auth hidden">
     <div class="card">
       <h1>Ngobrol</h1>
@@ -161,7 +143,6 @@ input:focus,textarea:focus{border-color:var(--ac)}
     </div>
   </div>
 
-  <!-- MAIN APP SCREEN -->
   <div id="app" class="app hidden">
     <aside class="side">
       <div class="mebar">
@@ -182,12 +163,11 @@ input:focus,textarea:focus{border-color:var(--ac)}
       <button class="fab" id="fab">+</button>
     </aside>
 
-    <!-- CHAT SCREEN -->
     <section id="chat" class="hidden">
       <div class="ch">
         <button class="ico" id="back">←</button>
-        <div id="cAv" onclick="showGroupInfo()"></div>
-        <div class="nm" onclick="showGroupInfo()">
+        <div id="cAv" onclick="checkGroupInfoClick()"></div>
+        <div class="nm" onclick="checkGroupInfoClick()">
           <b id="cName"></b>
           <span id="cSub" style="color:var(--mu);font-size:11.5px"></span>
         </div>
@@ -243,8 +223,7 @@ const getBadgeSvg = (color = 'blue') => `<svg class="bl ${color}" viewBox="0 0 2
 const nameOf = u => (prof[u] && prof[u].name) || u;
 const badge = u => {
   if (!prof[u] || !prof[u].v) return '';
-  const color = prof[u].badgeColor || 'blue';
-  return getBadgeSvg(color);
+  return getBadgeSvg(prof[u].badgeColor || 'blue');
 };
 
 const hue = s => ([...s].reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 360;
@@ -258,7 +237,6 @@ const avUser = (u, cls = '') => {
 };
 
 const time = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 2600); }
 
 async function api(path, body) {
@@ -278,48 +256,28 @@ async function ensureProfiles(list, force) {
   u.forEach(x => (prof[x] = r[x] || { name: x }));
 }
 
-// ---------- Auth (Login/Register via Username) ----------
 $('#aGo').onclick = async () => {
   $('#aErr').textContent = '';
   try {
-    const name = $('#rName').value;
-    const username = $('#rUser').value;
-    if (!username) return $('#aErr').textContent = 'Masukkan username kamu';
-
-    const r = await api('register', { name, username });
+    const r = await api('register', { name: $('#rName').value, username: $('#rUser').value });
     myUsername = r.username;
     localStorage.setItem('myUsername', myUsername);
     boot();
-  } catch (e) { 
-    $('#aErr').textContent = e.message; 
-  }
+  } catch (e) { $('#aErr').textContent = e.message; }
 };
 
-function logout() { 
-  localStorage.removeItem('myUsername'); 
-  localStorage.removeItem('seen'); 
-  location.reload(); 
-}
+function logout() { localStorage.removeItem('myUsername'); localStorage.removeItem('seen'); location.reload(); }
 
 async function boot() {
   $('#auth').classList.add('hidden'); 
   $('#app').classList.remove('hidden');
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  
   try {
     me = await api('me');
-    prof[me.username] = { 
-      name: me.name, 
-      v: me.verified || me.username === 'aldev', 
-      badgeColor: me.devBadgeColor || 'blue',
-      a: me.av 
-    };
+    prof[me.username] = { name: me.name, v: me.verified || me.username === 'aldev', badgeColor: me.devBadgeColor || 'blue', a: me.av };
     drawMe();
     await loadChats();
     tick();
-  } catch(e) {
-    logout();
-  }
+  } catch(e) { logout(); }
 }
 
 function drawMe() {
@@ -339,7 +297,7 @@ async function tick() {
   timer = setTimeout(tick, document.hidden ? 15000 : 4000);
 }
 
-function unread(c) { return (c.id === active && !document.hidden) ? 0 : Math.max(0, c.count - (seen[c.id] ?? 0)); }
+const unread = c => (c.id === active && !document.hidden) ? 0 : Math.max(0, c.count - (seen[c.id] ?? 0));
 
 async function loadChats() {
   const list = await api('chats');
@@ -367,11 +325,7 @@ function renderList() {
     const msgText = c.last ? (c.last.t || '🎙️ Pesan suara') : '';
     const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === myUsername ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
     
-    let aHtml = '';
-    if (c.type === 'dm') aHtml = avUser(c.other);
-    else if (c.avatar) aHtml = `<img class="av" src="${c.avatar}">`;
-    else aHtml = avText(title(c), c.id);
-
+    let aHtml = c.type === 'dm' ? avUser(c.other) : (c.avatar ? `<img class="av" src="${c.avatar}">` : avText(title(c), c.id));
     const isVerifiedGroup = c.id === 'global' || c.verified;
     const isPinned = pinnedChats.includes(c.id);
 
@@ -408,12 +362,7 @@ async function openChat(id) {
   const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '');
   
   $('#cName').innerHTML = esc(t) + headerBadge;
-  
-  if (c && c.type !== 'dm' && c.avatar) {
-    $('#cAv').innerHTML = `<img class="av s" src="${c.avatar}">`;
-  } else {
-    $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
-  }
+  $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
 
   updateHeaderSub();
   $('#msgs').innerHTML = '';
@@ -425,12 +374,10 @@ async function openChat(id) {
 async function updateHeaderSub() {
   if (!active) return;
   const c = chats.find(x => x.id === active);
-  
   if (c && c.type === 'dm') {
     $('#cSub').textContent = '@' + c.other;
     return;
   }
-
   try {
     const res = await api('group-members?chat=' + encodeURIComponent(active));
     $('#cSub').textContent = `${res.onlineCount} online · ${res.total} member`;
@@ -439,14 +386,19 @@ async function updateHeaderSub() {
   }
 }
 
+function checkGroupInfoClick() {
+  const c = chats.find(x => x.id === active);
+  if (c && c.type !== 'dm') showGroupInfo();
+}
+
 async function showGroupInfo() {
   if (!active) return;
   const c = chats.find(x => x.id === active);
-  if (!c) return;
+  if (!c || c.type === 'dm') return;
 
   try {
     const res = await api('group-members?chat=' + encodeURIComponent(active));
-    const title = c.type === 'dm' ? nameOf(c.other) : c.title;
+    const title = c.title;
 
     let myRole = 'member';
     const meObj = res.members.find(m => m.username === myUsername);
@@ -467,47 +419,53 @@ async function showGroupInfo() {
         <span class="m-role">${m.role.toUpperCase()}</span>
         ${canManage && c.type === 'group' ? `
           <button class="btn danger" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="kickMember('${m.username}')">Kick</button>
-          ${myRole === 'owner' && m.role !== 'admin' ? `<button class="btn" style="padding:4px 8px;font-size:11px;margin-left:4px" onclick="promoteMember('${m.username}')">Admin</button>` : ''}
         ` : ''}
       </div>`;
     }).join('');
 
-    let groupHeaderAv = c.type === 'dm' ? avUser(c.other, 'lg') : (c.avatar ? `<img class="av lg" src="${c.avatar}">` : avText(title, c.id, 'lg'));
+    let groupHeaderAv = c.avatar ? `<img class="av lg" src="${c.avatar}">` : avText(title, c.id, 'lg');
 
     modal(`
       <div style="text-align:center">
         ${groupHeaderAv}
         <h2 style="font-size:18px;">${esc(title)}</h2>
-        <p style="color:var(--mu);font-size:12px;">${c.type === 'dm' ? '@' + c.other : `Ruang bersama (${res.onlineCount} online dari${res.total} member)`}</p>
+        <p style="color:var(--mu);font-size:12px;">Ruang bersama (${res.onlineCount} online dari ${res.total} member)</p>
       </div>
-      
-      ${c.type === 'group' ? `
-        <label style="margin-top:12px;">Kode / Link Undangan Grup</label>
-        <div class="code"><span>${c.code}</span><button class="btn" onclick="copy('${c.code}')">Salin Kode</button></div>
-      ` : ''}
-
-      ${c.type !== 'dm' ? `<label style="margin-top:16px;">Daftar Anggota (${res.total})</label>
-      <div style="max-height:200px;overflow:auto;margin-top:6px">${memberHtml}</div>` : ''}
+      <label style="margin-top:12px;">Kode / Link Undangan Grup</label>
+      <div class="code"><span>${c.code}</span><button class="btn" onclick="copy('${c.code}')">Salin Kode</button></div>
+      <label style="margin-top:16px;">Daftar Anggota (${res.total})</label>
+      <div style="max-height:200px;overflow:auto;margin-top:6px">${memberHtml}</div>
     `);
   } catch(e) { toast(e.message); }
 }
 
 $('#back').onclick = () => { active = null; $('#chat').classList.add('hidden'); renderList(); };
 
-/* Titik tiga (⋮) Perbaikan Event Click */
+/* DINAMIS MENU TITIK TIGA (DM vs GRUP) */
 $('#cMenuBtn').onclick = () => {
   if (!active) return;
+  const c = chats.find(x => x.id === active);
+  if (!c) return;
+
+  const isDm = c.type === 'dm';
   const isPinned = pinnedChats.includes(active);
   const isMuted = mutedChats.includes(active);
 
-  $('#actionSheetBox').innerHTML = `
+  let menuHtml = `
     <button class="action-item" onclick="toggleInChatSearch()"><span>🔍</span> Cari pesan</button>
     <button class="action-item" onclick="togglePinChat()"><span>📌</span> ${isPinned ? 'Lepas sematan chat' : 'Sematkan chat'}</button>
     <button class="action-item" onclick="toggleArchiveChat()"><span>📦</span> Arsipkan chat</button>
     <button class="action-item" onclick="toggleMuteChat()"><span>🔕</span> ${isMuted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'}</button>
-    <button class="action-item" onclick="showGroupInfo()"><span>👥</span> Info / Total Member</button>
-    <button class="action-item" style="color:#ff6b6b" onclick="closeActionSheetForce()"><span>✕</span> Batal</button>
   `;
+
+  // Menu Info Grup HANYA MUNCUL kalau itu grup, bukan DM/Bot
+  if (!isDm) {
+    menuHtml += `<button class="action-item" onclick="closeActionSheetForce(); showGroupInfo()"><span>👥</span> Info / Total Member</button>`;
+  }
+
+  menuHtml += `<button class="action-item" style="color:#ff6b6b" onclick="closeActionSheetForce()"><span>✕</span> Batal</button>`;
+
+  $('#actionSheetBox').innerHTML = menuHtml;
   $('#actionSheetModal').classList.remove('hidden');
 };
 
@@ -551,7 +509,8 @@ function toggleArchiveChat() {
   closeActionSheetForce();
   if (!archivedChats.includes(active)) archivedChats.push(active);
   localStorage.setItem('archivedChats', JSON.stringify(archivedChats));
-  $('#back').click();
+  $('#chat').classList.add('hidden');
+  renderList();
   toast('Chat diarsipkan');
 }
 
@@ -583,15 +542,7 @@ function renderMsgs() {
     const mine = m.u === myUsername, idx = start + i;
     const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
     
-    let contentHtml = '';
-    if (m.deleted) {
-      contentHtml = `<div style="font-style:italic; opacity:0.6;">${m.t}</div>`;
-    } else if (m.audio) {
-      contentHtml = `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>`;
-    } else {
-      contentHtml = `<div>${fmt(m.t)}</div>`;
-    }
-
+    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
     const canDelete = mine || myUsername === 'aldev';
 
     return `<div class="row ${mine ? 'me' : ''}"><div class="b" ondblclick="react(${idx},'❤️')">
@@ -638,25 +589,19 @@ async function send() {
 $('#send').onclick = send;
 $('#inp').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send(); } };
 
-// ---------- Voice Note (VN) ----------
+// Voice Note (VN)
 let mediaRec, audioChunks = [], isRecording = false, isCanceled = false;
-
 $('#vnBtn').onclick = async () => {
   if (!active) return toast('Pilih chat dulu');
-
   if (!isRecording) {
-    audioChunks = [];
-    isCanceled = false;
+    audioChunks = []; isCanceled = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRec = new MediaRecorder(stream);
       mediaRec.ondataavailable = e => audioChunks.push(e.data);
       mediaRec.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        if (isCanceled) {
-          toast('Perekaman VN dibatalkan');
-          return;
-        }
+        if (isCanceled) return toast('Perekaman VN dibatalkan');
         const blob = new Blob(audioChunks, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.readAsDataURL(blob);
@@ -675,9 +620,7 @@ $('#vnBtn').onclick = async () => {
       toast('Merekam VN...');
     } catch(e) { toast('Gagal akses mic'); }
   } else {
-    if (mediaRec && mediaRec.state === 'recording') {
-      mediaRec.stop();
-    }
+    if (mediaRec && mediaRec.state === 'recording') mediaRec.stop();
     isRecording = false;
     $('#vnBtn').textContent = '🎙️';
     $('#cancelVnBtn').classList.add('hidden');
@@ -686,8 +629,7 @@ $('#vnBtn').onclick = async () => {
 
 $('#cancelVnBtn').onclick = () => {
   if (isRecording && mediaRec) {
-    isCanceled = true;
-    mediaRec.stop();
+    isCanceled = true; mediaRec.stop();
     isRecording = false;
     $('#vnBtn').textContent = '🎙️';
     $('#cancelVnBtn').classList.add('hidden');
