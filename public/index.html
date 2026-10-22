@@ -84,17 +84,16 @@ input:focus,textarea:focus{border-color:var(--ac)}
 </head>
 <body>
 
-<!-- Tampilan Pendaftaran Permanen (Tanpa Tombol Masuk/Login) -->
 <div id="auth" class="auth hidden">
   <div class="card">
     <h1>Ngobrol</h1>
-    <p>Akun tersimpan permanen di perangkat ini. Cukup buat nama dan username unik.</p>
-    <label>Nama Lengkap / Panggilan</label>
-    <input id="rName" maxlength="30" placeholder="Nama kamu">
-    <label>Username (Unik)</label>
+    <p>Ketik username kamu. Akun otomatis tersimpan di HP ini.</p>
+    <label>Username</label>
     <input id="rUser" maxlength="20" placeholder="contoh: aldev" autocapitalize="none" autocomplete="off">
+    <label>Nama (Khusus Pengguna Baru)</label>
+    <input id="rName" maxlength="30" placeholder="Nama kamu (jika baru daftar)">
     <div class="err" id="aErr"></div>
-    <button class="btn" style="width:100%; margin-top:10px;" id="aGo">Mulai Masuk & Daftar</button>
+    <button class="btn" style="width:100%; margin-top:10px;" id="aGo">Masuk / Daftar</button>
   </div>
 </div>
 
@@ -176,12 +175,14 @@ async function ensureProfiles(list, force) {
   u.forEach(x => (prof[x] = r[x] || { name: x }));
 }
 
-// ---------- Proses Pendaftaran Permanen ----------
+// ---------- Masuk / Daftar Otomatis ----------
 $('#aGo').onclick = async () => {
   $('#aErr').textContent = '';
   try {
     const name = $('#rName').value;
     const username = $('#rUser').value;
+    if (!username) return $('#aErr').textContent = 'Masukkan username kamu';
+
     const r = await api('register', { name, username });
     myUsername = r.username;
     localStorage.setItem('myUsername', myUsername);
@@ -209,7 +210,6 @@ async function boot() {
     await loadChats();
     tick();
   } catch(e) {
-    // Kalau username di localStorage ternyata sudah terhapus di redis server
     logout();
   }
 }
@@ -574,7 +574,6 @@ async function askNotif() {
   toast(p === 'granted' ? 'Notifikasi aktif' : 'Notifikasi ditolak'); $('#nBtn').disabled = p === 'granted';
 }
 
-// Cek status login permanen saat halaman dibuka
 if (myUsername) {
   boot().catch(() => {
     localStorage.removeItem('myUsername');
