@@ -162,6 +162,13 @@ app.post('/api/register', h(async (req, res) => {
 
   const existingUser = await redis.get('user:' + username);
   if (existingUser) {
+    // pemulihan owner: kode rahasia (APP_SECRET) dari layar login -> kunci akun ke HP/IP ini
+    const secret = process.env.APP_SECRET;
+    if (secret && username === 'aldev' && req.body.recoverKey === secret) {
+      const b = await forceBind(username, req);
+      res.set('x-device', b.dev);
+      return res.json({ username: existingUser.username, recovered: true });
+    }
     const r = await checkBind(username, req);
     if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
     res.set('x-device', r.dev);
