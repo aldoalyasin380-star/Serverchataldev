@@ -282,7 +282,12 @@ const fmt = s => esc(s)
   .replace(/\|\|([^|\n]+)\|\|/g, '<span class="sp" onclick="this.classList.toggle(\'on\')">$1</span>')
   .replace(/\n/g, '<br>');
 
-const getBadgeSvg = (color = 'blue') => `<svg class="bl ${color}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#2f81f7"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const getBadgeSvg = (color = 'blue') => {
+  const rainbow = color === 'rainbow';
+  const defs = rainbow ? '<defs><linearGradient id="ckRb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff3b3b"/><stop offset=".25" stop-color="#ffd23f"/><stop offset=".5" stop-color="#3ddc97"/><stop offset=".75" stop-color="#2f81f7"/><stop offset="1" stop-color="#b56bff"/></linearGradient></defs>' : '';
+  const fill = rainbow ? 'url(#ckRb)' : '#2f81f7';
+  return `<svg class="bl ${color}" viewBox="0 0 24 24">${defs}<circle cx="12" cy="12" r="11" fill="${fill}"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+};
 
 const nameOf = u => (prof[u] && prof[u].name) || u;
 const badge = u => {
@@ -696,7 +701,7 @@ function renderMsgs() {
     rendered.add(key);
     const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
 
-    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
+    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk" onclick="stkTap(${idx})"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker" onclick="stkTap(${idx})">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
     const canDelete = mine || myUsername === 'aldev';
     const quote = m.re && !m.deleted ? `<div class="qt" onclick="jumpTo(${m.re.i})"><b>${esc(nameOf(m.re.u))}</b><span>${esc(m.re.t)}</span></div>` : '';
 
@@ -861,15 +866,18 @@ $('#inp').addEventListener('input', () => {
 const STK = { maxVid: 3, recent: [] };
 $('#stkBtn').onclick = openStickerTray;
 
-function openStickerTray() {
+async function openStickerTray() {
   if (!active) return toast('Pilih chat dulu');
+  let pack = [];
+  try { pack = await api('stickers'); } catch (e) {}
+  const all = [...STK.recent, ...pack.filter(p => !STK.recent.some(r => r.d === p.d))];
   modal(`<h3>🏷️ Stiker <button class="ico" onclick="closeModal()">✕</button></h3>
     <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Foto jadi stiker gambar. Video (maks ${STK.maxVid} detik) jadi stiker yang bergerak dan berulang.</p>
     <button class="btn" style="width:100%" onclick="pickSticker()">➕ Buat stiker dari foto / video</button>
     <div class="stk-grid" id="stkGrid"></div>
-    ${STK.recent.length ? '' : '<div style="color:var(--mu);font-size:13px;padding:14px 0 0;text-align:center">Stiker yang kamu buat di sesi ini muncul di sini</div>'}`);
+    ${all.length ? '' : '<div style="color:var(--mu);font-size:13px;padding:14px 0 0;text-align:center">Belum ada stiker. Buat sendiri, atau ketuk stiker di chat lalu simpan.</div>'}`);
   const grid = $('#stkGrid');
-  STK.recent.forEach(x => {
+  all.forEach(x => {
     const b = document.createElement('button');
     b.className = 'stk-cell';
     b.innerHTML = x.k === 'vid' ? `<video src="${x.d}" autoplay loop muted playsinline></video>` : `<img src="${x.d}" alt="">`;
@@ -878,11 +886,37 @@ function openStickerTray() {
   });
 }
 
+function stkTap(idx) {
+  const m = msgs.find(x => x.i === idx);
+  if (!m || !m.stk) return;
+  const prev = m.stk.k === 'vid'
+    ? `<video src="${m.stk.d}" autoplay loop muted playsinline style="width:160px;height:160px;object-fit:contain"></video>`
+    : `<img src="${m.stk.d}" style="width:160px;height:160px;object-fit:contain">`;
+  modal(`<h3>🏷️ Stiker <button class="ico" onclick="closeModal()">✕</button></h3>
+    <div style="display:flex;justify-content:center;margin:10px 0">${prev}</div>
+    <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="saveSticker(${idx})">💾 Simpan stiker</button></div>`);
+}
+
+async function saveSticker(idx) {
+  const m = msgs.find(x => x.i === idx);
+  if (!m || !m.stk) return;
+  try {
+    await api('stickers/save', { k: m.stk.k, d: m.stk.d });
+    closeModal();
+    toast('Stiker disimpan ke koleksimu');
+  } catch (e) { toast(e.message); }
+}
+
 function pickSticker() {
+  document.querySelectorAll('input[data-stk]').forEach(x => x.remove());
   const f = document.createElement('input');
   f.type = 'file'; f.accept = 'image/*,video/*';
+  f.setAttribute('data-stk', '1');
+  f.style.display = 'none';
+  document.body.appendChild(f);
   f.onchange = async () => {
     const file = f.files && f.files[0];
+    f.remove();
     if (!file) return;
     closeModal(); toast('Lagi bikin stiker...');
     try {
