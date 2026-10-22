@@ -13,7 +13,8 @@ button,input,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none;touch-action:manipulation}
 .hidden{display:none!important}
 .av{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;font-weight:600;color:#fff}
-.av.s{width:36px;height:36px;font-size:14px}
+.av.s{width:38px;height:38px;font-size:14px}
+.av.lg{width:90px;height:90px;font-size:32px;margin:0 auto 10px}
 
 .bl{width:15px;height:15px;vertical-align:-2px;margin-left:4px}
 .bl.red circle{fill:#ff4757!important}
@@ -60,14 +61,15 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .item .m{flex:1;min-width:0}.item .t{display:flex;justify-content:space-between;gap:8px}
 .item .t b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .t small{color:var(--mu);font-size:12px;flex:none}
-.item .p{color:var(--mu);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .p{color:var(--mu);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;justify-content:space-between}
 .un{background:var(--ac);color:#06281b;font-size:12px;font-weight:700;border-radius:10px;padding:1px 7px;margin-left:6px}
+.pinned-tag{font-size:11px;color:var(--ac);margin-right:4px}
 .fab{position:absolute;right:18px;bottom:22px;width:54px;height:54px;border-radius:16px;background:var(--ac);color:#06281b;font-size:28px;box-shadow:0 6px 18px #0008}
 .main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .empty{margin:auto;color:var(--mu);text-align:center;padding:20px}
 #chat{display:flex;flex-direction:column;height:100%;min-height:0}
 .ch{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--bg)}
-.ch .nm{flex:1;min-width:0}.back{display:none}
+.ch .nm{flex:1;min-width:0;cursor:pointer}.back{display:none}
 #msgs{flex:1;overflow:auto;padding:14px 12px;display:flex;flex-direction:column;gap:4px;background:radial-gradient(#ffffff08 1px,transparent 1px) 0 0/22px 22px}
 .row{display:flex;flex-direction:column;align-items:flex-start;max-width:100%}.row.me{align-items:flex-end}
 .b{max-width:min(78%,520px);background:var(--other);border-radius:14px 14px 14px 4px;padding:7px 11px 5px;word-wrap:break-word;overflow-wrap:anywhere;position:relative}
@@ -86,15 +88,30 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .comp input{border-radius:22px}
 .comp .btn{border-radius:22px;padding:0 16px;height:42px}
 .hint{font-size:11.5px;color:var(--mu);text-align:center;padding:0 12px 6px}
-/* modal */
+
+/* Search bar in chat room */
+.chat-search-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.chat-search-bar input{border-radius:8px;padding:6px 10px;font-size:13px}
+
+/* modal & action sheet whatsapp style */
 .modal{position:fixed;inset:0;background:#000a;display:grid;place-items:center;padding:16px;z-index:40;overflow:auto}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:400px;padding:18px;max-height:92dvh;overflow:auto}
 .box h3{margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 .box label{display:block;font-size:12px;color:var(--mu);margin:12px 0 5px;text-transform:uppercase;letter-spacing:.04em}
 .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
-.menu button{display:block;width:100%;text-align:left;padding:13px 8px;border-radius:10px}.menu button:hover{background:var(--bg)}
-.ms{margin:7px 0;font-size:13.5px}.ms .r{display:flex;justify-content:space-between}
-.bar{height:5px;background:var(--bg);border-radius:4px;margin-top:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
+
+/* Action sheet Bottom Menu */
+.action-sheet{position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-radius:20px 20px 0 0;padding:16px;z-index:45;border-top:1px solid var(--line);animation:slideUp .2s ease-out}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.action-item{display:flex;align-items:center;gap:12px;padding:14px;width:100%;font-size:15px;color:var(--tx);border-radius:10px;text-align:left}
+.action-item:hover,.action-item:active{background:var(--bg)}
+.action-item span{font-size:18px}
+
+.member-list-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #ffffff0a}
+.member-list-item .m-info{flex:1;min-width:0}
+.member-list-item .m-info b{display:block;font-size:14px}
+.member-list-item .m-info span{font-size:12px;color:var(--mu)}
+
 .code{font-family:ui-monospace,monospace;color:#6cb6ff;background:var(--bg);padding:10px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;word-break:break-all}
 #toast{position:fixed;left:50%;top:14px;transform:translateX(-50%);background:#222833;border:1px solid var(--line);padding:10px 16px;border-radius:12px;z-index:60;max-width:90vw;opacity:0;pointer-events:none;transition:.2s}
 #toast.on{opacity:1}
@@ -132,10 +149,20 @@ input:focus,textarea:focus{border-color:var(--ac)}
     <section id="chat" class="hidden">
       <div class="ch">
         <button class="ico back" id="back">←</button>
-        <div id="cAv"></div>
-        <div class="nm"><b id="cName"></b><span id="cSub" style="color:var(--mu);font-size:13px"></span></div>
-        <button class="ico hidden" id="cSettings" title="Pengaturan Chat / Grup">⚙️</button>
+        <div id="cAv" onclick="showGroupInfo()"></div>
+        <div class="nm" onclick="showGroupInfo()">
+          <b id="cName"></b>
+          <span id="cSub" style="color:var(--mu);font-size:12.5px"></span>
+        </div>
+        <button class="ico" id="cMenuBtn" title="Menu Opsi">⋮</button>
       </div>
+
+      <!-- In-Chat Search Bar -->
+      <div id="chatSearchBar" class="chat-search-bar hidden">
+        <input id="inChatSearchInput" placeholder="Cari pesan di chat ini..." autocomplete="off">
+        <button class="btn g" onclick="closeInChatSearch()" style="padding:6px 12px;height:auto">Tutup</button>
+      </div>
+
       <div id="msgs"></div>
       <div class="hint">Format: *tebal* _miring_ ~coret~ `kode` ||spoiler|| · tap 2x pesan buat ❤️</div>
       <div class="comp">
@@ -148,6 +175,10 @@ input:focus,textarea:focus{border-color:var(--ac)}
   </main>
 </div>
 
+<div id="actionSheetModal" class="modal hidden" onclick="closeActionSheet(event)">
+  <div class="action-sheet" id="actionSheetBox"></div>
+</div>
+
 <div id="modal" class="modal hidden"><div class="box" id="box"></div></div>
 <div id="toast"></div>
 
@@ -155,6 +186,10 @@ input:focus,textarea:focus{border-color:var(--ac)}
 const $ = s => document.querySelector(s);
 let myUsername = localStorage.getItem('myUsername') || null;
 let me = null, chats = [], active = null, msgs = [], start = 0, ver = '', prof = {}, prevCount = null, timer, people = [];
+let pinnedChats = JSON.parse(localStorage.getItem('pinnedChats') || '[]');
+let archivedChats = JSON.parse(localStorage.getItem('archivedChats') || '[]');
+let mutedChats = JSON.parse(localStorage.getItem('mutedChats') || '[]');
+
 let seen = JSON.parse(localStorage.getItem('seen') || '{}');
 const saveSeen = () => localStorage.setItem('seen', JSON.stringify(seen));
 
@@ -272,6 +307,7 @@ function beep() {
 }
 
 function notify(c) {
+  if (mutedChats.includes(c.id)) return;
   const t = c.type === 'dm' ? nameOf(c.other) : c.title;
   const body = (c.type === 'dm' ? '' : nameOf(c.last.u) + ': ') + (c.last.t || '[Voice Note]').slice(0, 100);
   beep(); if (navigator.vibrate) navigator.vibrate(120);
@@ -294,18 +330,30 @@ async function loadChats() {
 function renderList() {
   const q = $('#q').value.trim().toLowerCase();
   const title = c => c.type === 'dm' ? nameOf(c.other) : c.title;
-  const show = chats.filter(c => !q || title(c).toLowerCase().includes(q) || (c.other || '').includes(q))
-    .sort((a, b) => ((b.last && b.last.ts) || 0) - ((a.last && a.last.ts) || 0));
+  
+  const show = chats.filter(c => {
+    if (archivedChats.includes(c.id)) return false;
+    return !q || title(c).toLowerCase().includes(q) || (c.other || '').includes(q);
+  }).sort((a, b) => {
+    const aPin = pinnedChats.includes(a.id) ? 1 : 0;
+    const bPin = pinnedChats.includes(b.id) ? 1 : 0;
+    if (aPin !== bPin) return bPin - aPin;
+    return ((b.last && b.last.ts) || 0) - ((a.last && a.last.ts) || 0);
+  });
+
   let html = show.map(c => {
     const u = unread(c);
     const msgText = c.last ? (c.last.t || '🎙️ Pesan suara') : '';
     const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === myUsername ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
     const a = c.type === 'dm' ? avUser(c.other) : avText(title(c), c.id);
     const isVerifiedGroup = c.id === 'global' || c.verified;
+    const isPinned = pinnedChats.includes(c.id);
+
     return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${a}<div class="m">
       <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
-      <div class="p">${esc(prev)}${u ? `<span class="un">${u}</span>` : ''}</div></div></div>`;
+      <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `<span class="un">${u}</span>` : ''}</div></div></div></div>`;
   }).join('');
+
   if (!show.length && !people.length) html = '<div class="empty" style="padding:30px">Belum ada chat.</div>';
   if (people.length) {
     html += '<div class="sec">Orang</div>' + people.map(p => {
@@ -337,78 +385,139 @@ async function openChat(id) {
   
   $('#cName').innerHTML = esc(t) + headerBadge;
   $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
-  $('#cSub').textContent = !c ? '' : c.type === 'dm' ? '@' + c.other : c.type === 'group' ? c.members + ' anggota · kode ' + c.code : 'Grup publik resmi terverifikasi';
-  $('#cSettings').classList.remove('hidden');
+  
+  updateHeaderSub();
+  
   $('#msgs').innerHTML = '';
   renderList();
   await loadMessages();
   $('#inp').focus();
 }
 
-$('#back').onclick = () => { active = null; $('#app').classList.remove('open'); $('#chat').classList.add('hidden'); $('#empty').classList.remove('hidden'); renderList(); };
+async function updateHeaderSub() {
+  if (!active) return;
+  try {
+    const res = await api('group-members?chat=' + encodeURIComponent(active));
+    $('#cSub').textContent = `Host aktif · ${res.onlineCount} online`;
+  } catch(e) {
+    $('#cSub').textContent = `Host aktif`;
+  }
+}
 
-$('#cSettings').onclick = async () => {
+// Modal Info Anggota Mirip Screenshot 1
+async function showGroupInfo() {
+  if (!active) return;
   const c = chats.find(x => x.id === active);
   if (!c) return;
-  const resTtl = await api('settings/ttl?chat=' + active);
-  const currentTtl = resTtl.ttl || 0;
 
-  let html = `<h3>Pengaturan Chat <button class="ico" onclick="closeModal()">✕</button></h3>`;
-  if (c.type === 'group' || c.type === 'global') {
-    html += `<label>Kode Undangan Grup</label>
-    <div class="code"><span>${c.code || 'global-official'}</span><button class="btn" onclick="copy('${c.code || 'global'}')">Salin Kode</button></div>
-    <p style="color:var(--mu);font-size:12px;margin-top:4px">${c.type === 'global' ? 'Grup publik utama.' : 'Grup privat. Orang lain masuk via kode ini.'}</p>`;
-  }
-  if (c.type === 'group' && c.id !== 'global') {
-    html += `<label>Ubah Nama Grup</label><input id="modGroupName" value="${esc(c.title)}" maxlength="30">
-    <div class="acts"><button class="btn" onclick="updateGroupName('${c.code}')">Simpan Nama</button></div>
-    <div style="margin-top:15px; border-top:1px solid var(--line); padding-top:10px;">
-      <button class="btn danger" style="width:100%" onclick="deleteGroup('${c.code}')">Hapus Grup</button>
-    </div>`;
-  }
-  html += `<label>Timer Pesan Otomatis Terhapus (Auto-Delete)</label>
-  <select id="ttlSelect" style="background:var(--bg);color:var(--tx);padding:10px;border-radius:10px;width:100%;border:1px solid var(--line)">
-    <option value="0" ${currentTtl === 0 ? 'selected' : ''}>Mati (Default)</option>
-    <option value="10" ${currentTtl === 10 ? 'selected' : ''}>10 Detik</option>
-    <option value="30" ${currentTtl === 30 ? 'selected' : ''}>30 Detik</option>
-    <option value="60" ${currentTtl === 60 ? 'selected' : ''}>1 Menit</option>
-    <option value="300" ${currentTtl === 300 ? 'selected' : ''}>5 Menit</option>
-  </select>
-  <div class="acts" style="margin-top:15px;"><button class="btn" onclick="saveTtl()">Simpan Timer</button></div>`;
-  modal(html);
+  try {
+    const res = await api('group-members?chat=' + encodeURIComponent(active));
+    const title = c.type === 'dm' ? nameOf(c.other) : c.title;
+
+    let memberHtml = res.members.map(m => {
+      prof[m.username] = { name: m.name, v: m.v, badgeColor: m.badgeColor, a: m.a };
+      return `<div class="member-list-item" onclick="startDm('${m.username}')">
+        ${avUser(m.username, 's')}
+        <div class="m-info">
+          <b>${esc(m.name)}${badge(m.username)}</b>
+          <span>@${m.username} ${m.online ? '· <span style="color:var(--ac)">Online</span>' : ''}</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    modal(`
+      <div style="text-align:center">
+        ${c.type === 'dm' ? avUser(c.other, 'lg') : avText(title, c.id, 'lg')}
+        <h2 style="font-size:20px;">${esc(title)}</h2>
+        <p style="color:var(--mu);font-size:13px;">Ruang bersama (${res.onlineCount} online dari ${res.total} member)</p>
+      </div>
+      <label style="margin-top:20px;">Anggota di Chat Ini</label>
+      <div style="max-height:260px;overflow:auto;margin-top:8px">${memberHtml}</div>
+    `);
+  } catch(e) { toast(e.message); }
+}
+
+$('#back').onclick = () => { active = null; $('#app').classList.remove('open'); $('#chat').classList.add('hidden'); $('#empty').classList.remove('hidden'); renderList(); };
+
+// Action Sheet WhatsApp Style (Tombol Titik 3)
+$('#cMenuBtn').onclick = () => {
+  if (!active) return;
+  const isPinned = pinnedChats.includes(active);
+  const isMuted = mutedChats.includes(active);
+
+  $('#actionSheetBox').innerHTML = `
+    <button class="action-item" onclick="toggleInChatSearch()"><span>🔍</span> Cari pesan</button>
+    <button class="action-item" onclick="togglePinChat()"><span>📌</span> ${isPinned ? 'Lepas sematan chat' : 'Sematkan chat'}</button>
+    <button class="action-item" onclick="toggleArchiveChat()"><span>📦</span> Arsipkan chat</button>
+    <button class="action-item" onclick="markUnread()"><span>🔴</span> Tandai belum dibaca</button>
+    <button class="action-item" onclick="toggleMuteChat()"><span>🔕</span> ${isMuted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'}</button>
+    <button class="action-item" onclick="toast('Tersimpan di Pesan Berbintang')"><span>⭐</span> Pesan berbintang</button>
+    <button class="action-item" onclick="showGroupInfo()"><span>👥</span> Info / Total Member</button>
+    <button class="action-item" style="color:#ff6b6b" onclick="closeActionSheetForce()"><span>✕</span> Batal</button>
+  `;
+  $('#actionSheetModal').classList.remove('hidden');
 };
 
-async function saveTtl() {
-  const ttl = parseInt($('#ttlSelect').value, 10);
-  try {
-    await api('settings/ttl', { chat: active, ttl });
-    closeModal();
-    toast('Pengaturan auto-delete disimpan');
-    loadMessages();
-  } catch(e) { toast(e.message); }
+function closeActionSheet(e) {
+  if (e.target.id === 'actionSheetModal') $('#actionSheetModal').classList.add('hidden');
+}
+function closeActionSheetForce() { $('#actionSheetModal').classList.add('hidden'); }
+
+function toggleInChatSearch() {
+  closeActionSheetForce();
+  $('#chatSearchBar').classList.toggle('hidden');
+  if (!$('#chatSearchBar').classList.contains('hidden')) $('#inChatSearchInput').focus();
+}
+function closeInChatSearch() { $('#chatSearchBar').classList.add('hidden'); $('#inChatSearchInput').value = ''; renderMsgs(); }
+
+$('#inChatSearchInput').oninput = () => {
+  const query = $('#inChatSearchInput').value.trim().toLowerCase();
+  if (!query) return renderMsgs();
+  const box = $('#msgs');
+  const filtered = msgs.filter(m => m.t && m.t.toLowerCase().includes(query));
+  
+  box.innerHTML = filtered.map(m => `
+    <div class="row ${m.u === myUsername ? 'me' : ''}">
+      <div class="b" style="border:1px solid var(--ac)">
+        <div class="who">${esc(nameOf(m.u))}</div>
+        <div>${fmt(m.t)}</div>
+        <div class="meta">${time(m.ts)}</div>
+      </div>
+    </div>
+  `).join('');
+};
+
+function togglePinChat() {
+  closeActionSheetForce();
+  if (pinnedChats.includes(active)) pinnedChats = pinnedChats.filter(x => x !== active);
+  else pinnedChats.push(active);
+  localStorage.setItem('pinnedChats', JSON.stringify(pinnedChats));
+  renderList();
+  toast('Status sematan diperbarui');
 }
 
-async function updateGroupName(code) {
-  const name = $('#modGroupName').value;
-  try {
-    await api('groups/update', { code, name });
-    closeModal();
-    loadChats();
-    toast('Nama grup diubah');
-  } catch(e) { toast(e.message); }
+function toggleArchiveChat() {
+  closeActionSheetForce();
+  if (!archivedChats.includes(active)) archivedChats.push(active);
+  localStorage.setItem('archivedChats', JSON.stringify(archivedChats));
+  $('#back').click();
+  toast('Chat diarsipkan');
 }
 
-async function deleteGroup(code) {
-  if(!confirm('Yakin ingin menghapus grup ini?')) return;
-  try {
-    await api('groups/update', { code, action: 'delete' });
-    closeModal();
-    active = null;
-    $('#chat').classList.add('hidden');
-    $('#empty').classList.remove('hidden');
-    loadChats();
-    toast('Grup dihapus');
-  } catch(e) { toast(e.message); }
+function markUnread() {
+  closeActionSheetForce();
+  seen[active] = Math.max(0, (seen[active] || 1) - 1);
+  saveSeen();
+  renderList();
+  toast('Ditandai belum dibaca');
+}
+
+function toggleMuteChat() {
+  closeActionSheetForce();
+  if (mutedChats.includes(active)) mutedChats = mutedChats.filter(x => x !== active);
+  else mutedChats.push(active);
+  localStorage.setItem('mutedChats', JSON.stringify(mutedChats));
+  toast('Pengaturan notifikasi disimpan');
 }
 
 async function loadMessages() {
@@ -547,7 +656,6 @@ $('#cancelVnBtn').onclick = () => {
 function modal(html) { $('#box').innerHTML = html; $('#modal').classList.remove('hidden'); }
 function closeModal() { $('#modal').classList.add('hidden'); }
 $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
-function copy(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Tersalin'), () => toast('Salin manual ya')); }
 
 $('#fab').onclick = () => modal(`<h3>Baru</h3><div class="menu">
   <button onclick="dmModal()">💬 Chat / kontak baru</button>
@@ -568,6 +676,7 @@ async function doDm(save) {
 }
 async function startDm(username, id) {
   try {
+    closeModal();
     if (!id) id = (await api('dm', { username })).id;
     $('#q').value = ''; people = [];
     ver = ''; await loadChats(); await openChat(id);
