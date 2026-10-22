@@ -52,11 +52,12 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .ch .nm{flex:1;min-width:0}.back{display:none}
 #msgs{flex:1;overflow:auto;padding:14px 12px;display:flex;flex-direction:column;gap:4px;background:radial-gradient(#ffffff08 1px,transparent 1px) 0 0/22px 22px}
 .row{display:flex;flex-direction:column;align-items:flex-start;max-width:100%}.row.me{align-items:flex-end}
-.b{max-width:min(78%,520px);background:var(--other);border-radius:14px 14px 14px 4px;padding:7px 11px 5px;word-wrap:break-word;overflow-wrap:anywhere}
+.b{max-width:min(78%,520px);background:var(--other);border-radius:14px 14px 14px 4px;padding:7px 11px 5px;word-wrap:break-word;overflow-wrap:anywhere;position:relative}
 .row.me .b{background:var(--mine);border-radius:14px 14px 4px 14px}
 .who{font-size:12.5px;font-weight:600;color:var(--ac);margin-bottom:1px}
-.meta{font-size:11px;color:var(--mu);text-align:right;margin-top:1px}
-.rb{font-size:12px;opacity:.5;margin-left:4px;padding:0 2px}
+.meta{font-size:11px;color:var(--mu);text-align:right;margin-top:1px;display:flex;align-items:center;justify-content:flex-end;gap:2px}
+.rb,.del-btn{font-size:12px;opacity:.6;padding:0 3px;background:none;border:none;cursor:pointer}
+.del-btn:hover{opacity:1;color:#ff6b6b}
 .b code{background:#0006;padding:1px 5px;border-radius:5px;font-family:ui-monospace,monospace;font-size:13px}
 .sp{background:#8a91a0;color:transparent;border-radius:4px;cursor:pointer}.sp.on{background:none;color:inherit}
 .rx{display:flex;gap:4px;margin-top:2px}.rx span{background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:12px;padding:0 7px;cursor:pointer}
@@ -121,7 +122,8 @@ input:focus,textarea:focus{border-color:var(--ac)}
       <div class="hint">Format: *tebal* _miring_ ~coret~ `kode` ||spoiler|| · tap 2x pesan buat ❤️</div>
       <div class="comp">
         <input id="inp" placeholder="Tulis pesan..." maxlength="2000" autocomplete="off">
-        <button class="btn g" id="vnBtn" title="Tahan untuk Rekam VN">🎙️</button>
+        <button class="btn g" id="vnBtn" title="Tekan untuk Rekam VN">🎙️</button>
+        <button class="btn danger hidden" id="cancelVnBtn" title="Batalkan VN">🛑</button>
         <button class="btn" id="send">Kirim</button>
       </div>
     </section>
@@ -398,19 +400,36 @@ function renderMsgs() {
     const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
     
     let contentHtml = '';
-    if (m.audio) {
+    if (m.deleted) {
+      contentHtml = `<div style="font-style:italic; opacity:0.6;">${m.t}</div>`;
+    } else if (m.audio) {
       contentHtml = `<audio controls src="${m.audio}" style="max-width:220px;height:35px;display:block;margin-top:2px;"></audio>`;
     } else {
       contentHtml = `<div>${fmt(m.t)}</div>`;
     }
 
+    const canDelete = mine || myUsername === 'aldev';
+
     return `<div class="row ${mine ? 'me' : ''}"><div class="b" ondblclick="react(${idx},'❤️')">
       ${grp && !mine ? `<div class="who">${esc(nameOf(m.u))}${badge(m.u) || (m.u === 'aldev' ? BLUE : '')}</div>` : ''}
       ${contentHtml}
-      <div class="meta">${time(m.ts)}<button class="rb" onclick="pick(event,${idx})">☺</button></div></div>
-      ${rx ? `<div class="rx">${rx}</div>` : ''}</div>`;
+      <div class="meta">${time(m.ts)}
+        ${!m.deleted && canDelete ? `<button class="del-btn" title="Hapus pesan" onclick="deleteMessage(${idx})">🗑️</button>` : ''}
+        ${!m.deleted ? `<button class="rb" onclick="pick(event,${idx})">☺</button>` : ''}
+      </div></div>
+      ${rx && !m.deleted ? `<div class="rx">${rx}</div>` : ''}</div>`;
   }).join('');
   if (first || near) box.scrollTop = box.scrollHeight;
+}
+
+// Fungsi Hapus Pesan
+async function deleteMessage(idx) {
+  if(!confirm('Hapus pesan ini?')) return;
+  try {
+    await api('delete-message', { chat: active, idx });
+    await loadMessages();
+    toast('Pesan dihapus');
+  } catch(e) { toast(e.message); }
 }
 
 async function react(idx, emoji) { try { await api('react', { chat: active, idx, emoji }); await loadMessages(); } catch (e) { toast(e.message); } }
@@ -436,37 +455,62 @@ async function send() {
 $('#send').onclick = send;
 $('#inp').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send(); } };
 
-let mediaRec, audioChunks = [];
-$('#vnBtn').onmousedown = async () => {
+// ---------- Voice Note (VN) Recorder + Stop/Cancel ----------
+let mediaRec, audioChunks = [], isRecording = false, isCanceled = false;
+
+$('#vnBtn').onclick = async () => {
   if (!active) return toast('Pilih chat dulu');
-  audioChunks = [];
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRec = new MediaRecorder(stream);
-    mediaRec.ondataavailable = e => audioChunks.push(e.data);
-    mediaRec.onstop = async () => {
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
-      const reader = new FileReader();
-      reader.readAsDataURL(blob);
-      reader.onloadend = async () => {
-        try {
-          await api('send', { chat: active, text: '', audio: reader.result });
-          beep(); ver = ''; await loadMessages(); loadChats();
-          toast('Voice Note terkirim');
-        } catch(err) { toast(err.message); }
+
+  if (!isRecording) {
+    // Mulai Rekam VN
+    audioChunks = [];
+    isCanceled = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRec = new MediaRecorder(stream);
+      mediaRec.ondataavailable = e => audioChunks.push(e.data);
+      mediaRec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (isCanceled) {
+          toast('Perekaman VN dibatalkan');
+          return;
+        }
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          try {
+            await api('send', { chat: active, text: '', audio: reader.result });
+            beep(); ver = ''; await loadMessages(); loadChats();
+            toast('Voice Note terkirim');
+          } catch(err) { toast(err.message); }
+        };
       };
-      stream.getTracks().forEach(t => t.stop());
-    };
-    mediaRec.start();
-    toast('Merekam suara... Lepas untuk kirim');
-    $('#vnBtn.btn').style.background = '#ff6b6b';
-  } catch(e) { toast('Gagal akses mic'); }
+      mediaRec.start();
+      isRecording = true;
+      $('#vnBtn').textContent = '⏹️ Kirim VN';
+      $('#cancelVnBtn').classList.remove('hidden');
+      toast('Merekam VN... Klik Kirim VN atau 🛑 Batal');
+    } catch(e) { toast('Gagal akses mic'); }
+  } else {
+    // Selesai Rekam & Kirim VN
+    if (mediaRec && mediaRec.state === 'recording') {
+      mediaRec.stop();
+    }
+    isRecording = false;
+    $('#vnBtn').textContent = '🎙️';
+    $('#cancelVnBtn').classList.add('hidden');
+  }
 };
 
-$('#vnBtn').onmouseup = () => {
-  if (mediaRec && mediaRec.state === 'recording') {
+// Batalkan Rekam VN
+$('#cancelVnBtn').onclick = () => {
+  if (isRecording && mediaRec) {
+    isCanceled = true;
     mediaRec.stop();
-    $('#vnBtn.btn').style.background = '';
+    isRecording = false;
+    $('#vnBtn').textContent = '🎙️';
+    $('#cancelVnBtn').classList.add('hidden');
   }
 };
 
