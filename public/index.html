@@ -40,6 +40,15 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .btn.g{background:var(--panel);color:var(--tx);border:1px solid var(--line)}
 .btn.danger{background:#ff6b6b;color:#fff}
 .btn:disabled{opacity:.4}
+
+/* Button WA Channel */
+.wa-channel-btn{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;margin:8px 12px;
+  background:#25d36618;border:1px solid #25d36655;border-radius:12px;
+  color:#25d366;font-weight:600;font-size:13px;text-decoration:none;
+}
+.wa-channel-btn:active{background:#25d36633}
+
 /* auth */
 .auth{min-height:100%;display:grid;place-items:center;padding:20px}
 .card{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px}
@@ -53,9 +62,9 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .mebar .nm{flex:1;min-width:0}.nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nm span{color:var(--mu);font-size:13px}
 .ico{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-size:18px;color:var(--mu)}
 .ico:active{background:var(--panel)}
-.sbox{padding:10px 12px}
+.sbox{padding:10px 12px 4px}
 #list{overflow:auto;flex:1;padding-bottom:90px}
-.sec{padding:10px 16px 4px;font-size:12px;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+.sec{padding:10px 16px 4px;font-size:12px;color:var(--mu);text-transform:uppercase;letter-spacing:.04em}
 .item{display:flex;gap:12px;padding:10px 14px;align-items:center;cursor:pointer}
 .item:hover,.item.on{background:var(--panel)}
 .item .m{flex:1;min-width:0}.item .t{display:flex;justify-content:space-between;gap:8px}
@@ -140,6 +149,15 @@ input:focus,textarea:focus{border-color:var(--ac)}
       <div class="nm"><b id="meName"></b><span id="meUser"></span></div>
       <button class="ico" id="gear" title="Pengaturan">⚙</button>
     </div>
+    
+    <!-- Tombol WhatsApp Channel Developer -->
+    <a href="https://whatsapp.com/channel/0029VbDanaD4yltW4XVITR1q" target="_blank" class="wa-channel-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm5.82 14.12c-.24.68-1.22 1.24-1.7 1.3-.44.06-1.01.09-3.23-.82-2.83-1.17-4.66-4.04-4.8-4.23-.14-.19-1.15-1.53-1.15-2.92 0-1.39.73-2.07.99-2.35.26-.28.57-.35.76-.35.19 0 .38 0 .54.01.18.01.42-.07.65.49.24.57.82 2 .89 2.15.07.15.12.33.02.52-.1.19-.15.31-.29.48-.14.17-.3.38-.43.51-.14.14-.29.3-.13.58.16.28.72 1.19 1.55 1.93 1.07.95 1.97 1.25 2.25 1.39.28.14.44.12.6-.07.16-.19.68-.79.86-1.06.18-.27.36-.23.6-.14.24.09 1.53.72 1.79.85.26.13.43.19.49.3.06.11.06.63-.18 1.31z"/>
+      </svg>
+      Channel Developer
+    </a>
+
     <div class="sbox"><input id="q" placeholder="Cari chat atau nama orang..." autocomplete="off"></div>
     <div id="list"></div>
     <button class="fab" id="fab">+</button>
@@ -409,13 +427,23 @@ async function openChat(id) {
   $('#inp').focus();
 }
 
+// PERBAIKAN LOGIKA SUB-HEADER CHAT
 async function updateHeaderSub() {
   if (!active) return;
+  const c = chats.find(x => x.id === active);
+  
+  // Jika Chat Pribadi (DM), tampilkan username saja (TIDAK ADA TEKS "Host aktif · X online")
+  if (c && c.type === 'dm') {
+    $('#cSub').textContent = '@' + c.other;
+    return;
+  }
+
+  // Jika Grup, tampilkan status member online
   try {
     const res = await api('group-members?chat=' + encodeURIComponent(active));
-    $('#cSub').textContent = `Host aktif · ${res.onlineCount} online`;
+    $('#cSub').textContent = `${res.onlineCount} online · ${res.total} member`;
   } catch(e) {
-    $('#cSub').textContent = `Host aktif`;
+    $('#cSub').textContent = `Grup`;
   }
 }
 
@@ -459,7 +487,7 @@ async function showGroupInfo() {
       <div style="text-align:center">
         ${groupHeaderAv}
         <h2 style="font-size:20px;">${esc(title)}</h2>
-        <p style="color:var(--mu);font-size:13px;">Ruang bersama (${res.onlineCount} online dari ${res.total} member)</p>
+        <p style="color:var(--mu);font-size:13px;">${c.type === 'dm' ? '@' + c.other : `Ruang bersama (${res.onlineCount} online dari${res.total} member)`}</p>
         ${c.type === 'group' && (myRole === 'owner' || myRole === 'admin') ? `
           <button class="btn g" style="margin-top:10px;font-size:12px;" onclick="editGroupAvatarModal('${c.code}')">📷 Ubah Foto Profil Grup</button>
         ` : ''}
@@ -470,8 +498,8 @@ async function showGroupInfo() {
         <div class="code"><span>${c.code}</span><button class="btn" onclick="copy('${c.code}')">Salin Kode</button></div>
       ` : ''}
 
-      <label style="margin-top:20px;">Daftar Anggota (${res.total})</label>
-      <div style="max-height:220px;overflow:auto;margin-top:8px">${memberHtml}</div>
+      ${c.type !== 'dm' ? `<label style="margin-top:20px;">Daftar Anggota (${res.total})</label>
+      <div style="max-height:220px;overflow:auto;margin-top:8px">${memberHtml}</div>` : ''}
     `);
   } catch(e) { toast(e.message); }
 }
