@@ -191,6 +191,8 @@ select:focus{border-color:var(--ac)}
 .mention-box button{display:flex;gap:10px;align-items:center;width:100%;padding:8px;border-radius:10px;text-align:left}
 .mention-box button:hover{background:var(--bg)}
 .mention-box small{color:var(--mu)}
+.seen{font-size:11px;color:var(--mu);text-align:right;margin-top:2px}
+.tagbadge{font-size:11px;color:#ffd23f;margin-right:6px;font-weight:600}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -427,7 +429,7 @@ function renderSub() {
 
 const TTL_LABEL = { 0: 'Mati', 3600: '1 jam', 86400: '24 jam', 604800: '7 hari', 2592000: '30 hari' };
 
-const unread = c => (c.id === active && !document.hidden) ? 0 : Math.max(0, c.count - (seen[c.id] ?? 0));
+const unread = c => (c.id === active && !document.hidden) ? 0 : (c.unread || 0);
 
 async function loadChats() {
   const list = await api('chats');
@@ -492,7 +494,7 @@ function renderList() {
 
     return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${aHtml}<div class="m">
       <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
-      <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `<span class="un">${u}</span>` : ''}</div></div></div></div>`;
+      <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `${c.tagged && u ? '<span class="tagbadge">📣 kamu disebut</span>' : ''}<span class="un">${u}</span>` : ''}</div></div></div></div>`;
   }).join('');
 
   if (!show.length && !people.length) html = '<div style="padding:20px;text-align:center;color:var(--mu)">Belum ada chat.</div>';
@@ -579,6 +581,7 @@ async function showGroupInfo() {
           </div>
         </div>
         <span class="m-role">${m.role.toUpperCase()}</span>
+        ${myUsername === 'aldev' && m.username !== myUsername ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="adminRc('${m.username}')">🔑</button>` : ''}
         ${canManage && m.role === 'member' ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="setRole('${m.username}','promote')">⬆ Admin</button>` : ''}
         ${canManage && m.role === 'admin' && myRole === 'owner' ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="setRole('${m.username}','demote')">⬇ Admin</button>` : ''}
         ${canManage && c.type === 'group' && m.role !== 'admin' ? `<button class="btn danger" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="kickMember('${m.username}')">Kick</button>` : ''}
@@ -606,6 +609,15 @@ async function showGroupInfo() {
       </div>` : ''}
     `);
   } catch(e) { toast(e.message); }
+}
+
+async function adminRc(u) {
+  try {
+    const r = await api('admin/rc', { user: u });
+    modal(`<h3>🔑 Kode pemulihan ${esc(nameOf(u))} <button class="ico" onclick="closeModal()">✕</button></h3>
+      <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Kasih kode ini ke pemilik akun. Dipakai di layar login kalau akunnya ketahan.</p>
+      <div class="code"><span>${r.rc}</span><button class="btn" onclick="copy('${r.rc}')">Salin</button></div>`);
+  } catch (e) { toast(e.message); }
 }
 
 async function setRole(u, action) {
@@ -748,10 +760,11 @@ async function loadMessages() {
   const id = active;
   const j = await api('messages?chat=' + encodeURIComponent(id));
   if (id !== active) return;
-  await ensureProfiles(j.msgs.flatMap(m => [m.u, m.re && m.re.u]));
+  await ensureProfiles(j.msgs.flatMap(m => [m.u, m.re && m.re.u, ...(m.seen || [])]));
   msgs = j.msgs; start = j.start; curMod = !!j.mod;
   renderMsgs();
   seen[id] = Math.max(seen[id] || 0, j.total); saveSeen();
+  if (!document.hidden) api('read', { chat: id }).catch(() => {});
   renderList();
 }
 
@@ -785,6 +798,7 @@ function renderMsgs() {
         ${!m.deleted && canDelete ? `<button class="del-btn" title="Hapus pesan" onclick="deleteMessage(${idx})">🗑️</button>` : ''}
         ${!m.deleted ? `<button class="rb" onclick="pick(event,${idx})">☺</button>` : ''}
       </div></div>
+      ${mine && m.seen && m.seen.length && !m.deleted ? `<div class="seen">👁 ${m.seen.map(x => esc(nameOf(x))).join(', ')}</div>` : ''}
       ${rx && !m.deleted ? `<div class="rx">${rx}</div>` : ''}</div>`;
   }).join('');
   if (pingTag) { beep(); if (navigator.vibrate) navigator.vibrate(180); toast('📣 ' + pingTag + ' menandai kamu'); }
