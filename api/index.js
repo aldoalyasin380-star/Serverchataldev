@@ -403,7 +403,8 @@ app.get('/api/chats', auth, h(async (req, res) => {
 
 app.get('/api/messages', auth, h(async (req, res) => {
   const chat = String(req.query.chat || '');
-  if (!(await access(req.u, chat)).ok) return res.status(403).json({ error: 'Akses ditolak' });
+  const accM = await access(req.u, chat);
+  if (!accM.ok) return res.status(403).json({ error: 'Akses ditolak' });
 
   const [ttlVals, total] = await Promise.all([
     redis.mget(ttlKey(req.u, chat), ttlKey(req.u, 'default')),
@@ -419,7 +420,7 @@ app.get('/api/messages', auth, h(async (req, res) => {
     if (ttl > 0 && (now - m.ts) >= ttl * 1000) return;
     msgs.push({ ...m, i: start + k });
   });
-  res.json({ start, total, msgs });
+  res.json({ start, total, msgs, mod: await canModerate(req.u, chat, accM) });
 }));
 
 // ---------- Kirim Pesan ----------
@@ -445,6 +446,15 @@ app.post('/api/send', auth, h(async (req, res) => {
   const msgObj = { u: req.u, t: text, audio: audio, ts: Date.now(), r: {} };
   if (stkObj) msgObj.stk = stkObj;
 
+  // tag @username: cuma yang benar-benar ada di chat ini
+  const cand = [...new Set([...text.matchAll(/(^|\s)@([a-z0-9_.]{3,20})/gi)].map(x => x[2].toLowerCase()))].filter(x => x !== req.u);
+  if (cand.length) {
+    let mn;
+    if (acc.members) mn = cand.filter(x => acc.members.includes(x));
+    else { const rows = await redis.mget(...cand.map(x => 'user:' + x)); mn = cand.filter((x, i) => rows[i]); }
+    if (mn.length) msgObj.mn = mn.slice(0, 10);
+  }
+
   // balas pesan: isi kutipan diambil dari database biar nggak bisa dipalsuin
   if (req.body.reply != null) {
     const ri = parseInt(req.body.reply, 10);
@@ -465,6 +475,13 @@ app.post('/api/send', auth, h(async (req, res) => {
   res.json({ ok: 1 });
 }));
 
+// Moderator: owner & admin grup (atau owner/admin Global). DM nggak punya moderator.
+async function canModerate(u, chat, acc) {
+  if (chat.startsWith('grp:')) { const g = acc.group; return !!g && (g.owner === u || (g.admins || []).includes(u)); }
+  if (chat === 'global') return u === 'aldev' || (await redis.smembers('gadmins')).includes(u);
+  return false;
+}
+
 app.post('/api/delete-message', auth, h(async (req, res) => {
   const { chat, idx } = req.body;
   const u = req.u;
@@ -474,8 +491,8 @@ app.post('/api/delete-message', auth, h(async (req, res) => {
   const m = await redis.lindex('c:' + chat, idx);
   if (!m) return res.status(404).json({ error: 'Pesan tidak ditemukan' });
   
-  if (m.u !== u && u !== 'aldev') {
-    return res.status(403).json({ error: 'Kamu hanya bisa menghapus pesan milikmu sendiri' });
+  if (m.u !== u && !(await canModerate(u, chat, acc))) {
+    return res.status(403).json({ error: 'Kamu cuma bisa menghapus pesan sendiri (owner/admin bisa hapus pesan anggota)' });
   }
 
   m.t = '🚮 Pesan ini telah dihapus';
