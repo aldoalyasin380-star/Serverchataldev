@@ -24,9 +24,9 @@ const SYSTEM_CONFIG = {
   mainGroupName: "Global Group",
   mainGroupAvatar: "https://files.catbox.moe/5k43y6.jpg",
   devBadgeColor: {
-    rainbow: false,
+    rainbow: true,
     red: false,
-    orange: true,
+    orange: false,
     yellow: false,
     blue: false
   }
@@ -51,6 +51,7 @@ const h = fn => (req, res) =>
 // Kalau IP beda DAN perangkatnya bukan perangkat yang dulu dipakai bikin akun -> ditolak.
 // Kunci perangkat (x-device) dipakai biar pemilik akun nggak ke-lock sendiri waktu IP HP-nya
 // ganti (data seluler / pindah wifi). Orang lain nggak punya kunci itu.
+const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '1', 10); // satu IP cuma boleh bikin sekian akun
 const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000];
 const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter // mati, 1 jam, 24 jam, 7 hari, 30 hari
 const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
@@ -89,7 +90,7 @@ async function checkBind(u, req) {
   }
   const sameIp = !!ip && b.ip === ip;
   const sameDev = !!dev && dev === b.dev;
-  if (!sameIp && !sameDev) return { ok: false };
+  if (!sameDev) return { ok: false };   // IP aja nggak cukup: harus perangkat yang sama
   if (!sameIp) { b.ip = ip; await redis.set('bind:' + u, b); cacheBind(u, b); } // perangkat sama, IP baru -> IP baru dipercaya
   return { ok: true, dev: b.dev };
 }
@@ -179,12 +180,15 @@ app.post('/api/register', h(async (req, res) => {
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
 
   const isAldev = username === 'aldev';
+  if (!isAldev && (await redis.scard('ipacc:' + ipOf(req))) >= MAX_ACC_PER_IP)
+    return res.status(403).json({ error: 'Satu IP cuma bisa bikin 1 akun. Pakai akun yang sudah ada, atau hubungi owner.' });
   const userData = { username, name, bio: '', av: 0, verified: isAldev ? true : false, created: Date.now(), rc: newRc() };
 
   await redis.set('user:' + username, userData);
   await redis.sadd('users', username);
   await redis.sadd('uchats:' + username, 'global');
 
+  await redis.sadd('ipacc:' + ipOf(req), username);
   const bound = await forceBind(username, req);
   res.set('x-device', bound.dev);
   res.json({ username });
@@ -398,6 +402,21 @@ app.get('/api/chats', auth, h(async (req, res) => {
     c.ttl = c.ttlSet === null ? defTtl : c.ttlSet;
     if (c.ttl > 0 && c.last && now - c.last.ts >= c.ttl * 1000) c.last = null;
   });
+  // status baca disimpan di server (sinkron web & APK). Chat baru di-set terbaca dulu biar nggak banjir unread.
+  const hp = redis.pipeline();
+  out.forEach(c => hp.hget('readc:' + c.id, u));
+  const rds = out.length ? await hp.exec() : [];
+  await Promise.all(out.map(async (c, i) => {
+    const count = +c.count || 0;
+    let rd = rds[i];
+    if (rd == null) { await redis.hset('readc:' + c.id, { [u]: count }); rd = count; }
+    c.unread = Math.max(0, count - (+rd || 0));
+    c.tagged = false;
+    if (c.unread > 0) {
+      const tail = await redis.lrange('c:' + c.id, -Math.min(c.unread, 30), -1);
+      c.tagged = tail.some(m => m && m.mn && m.mn.includes(u));
+    }
+  }));
   res.json(out);
 }));
 
@@ -419,6 +438,10 @@ app.get('/api/messages', auth, h(async (req, res) => {
     if (!m || m.u === LEGACY_BOT) return;
     if (ttl > 0 && (now - m.ts) >= ttl * 1000) return;
     msgs.push({ ...m, i: start + k });
+  });
+  const rdMap = (await redis.hgetall('readc:' + chat)) || {};
+  msgs.forEach(m => {
+    if (m.u === req.u) m.seen = Object.entries(rdMap).filter(([u, n]) => u !== req.u && (+n || 0) > m.i).map(([u]) => u);
   });
   res.json({ start, total, msgs, mod: await canModerate(req.u, chat, accM) });
 }));
@@ -564,6 +587,23 @@ app.get('/api/settings/ttl', auth, h(async (req, res) => {
 }));
 
 // ---------- Management Grup, Admin, & Kick/Add ----------
+app.post('/api/read', auth, h(async (req, res) => {
+  const chat = String(req.body.chat || '');
+  if (!(await access(req.u, chat)).ok) return res.status(403).json({ error: 'Akses ditolak' });
+  await redis.hset('readc:' + chat, { [req.u]: await redis.llen('c:' + chat) });
+  res.json({ ok: 1 });
+}));
+
+// pemulihan: owner ngasih kode ke akun yang ketahan (kode dibuat kalau belum ada)
+app.post('/api/admin/rc', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const u = clean(req.body.user);
+  const me = await redis.get('user:' + u);
+  if (!me) return res.status(404).json({ error: 'User tidak ditemukan' });
+  if (!me.rc) { me.rc = newRc(); await redis.set('user:' + u, me); }
+  res.json({ user: u, rc: me.rc });
+}));
+
 app.post('/api/groups', auth, h(async (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 30);
   if (!name) return res.status(400).json({ error: 'Nama grup wajib diisi' });
