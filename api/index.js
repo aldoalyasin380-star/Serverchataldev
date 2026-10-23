@@ -1,1284 +1,777 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0f1115">
-<title>Aldev Chat</title>
-<style>
-:root{--bg:#0f1115;--panel:#161920;--line:#252932;--tx:#e6e8ec;--mu:#8a91a0;--ac:#3ddc97;--mine:#1f4d3b;--other:#1c2029}
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+const express = require('express');
+const crypto = require('crypto');
+const path = require('path');
+const { Redis } = require('@upstash/redis');
 
-html,body{
-  width:100%;
-  height:100%;
-  background:var(--bg);
-  color:var(--tx);
-  font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  overflow:hidden;
-}
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
+});
 
-.app-container {
-  width: 100%;
-  max-width: 520px;
-  margin: 0 auto;
-  height: 100dvh;
-  background: var(--bg);
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 0 0 1px var(--line), 0 12px 60px #000c;
-}
+const app = express();
+app.use(express.json({ limit: '1mb' }));
 
-button,input,textarea{font:inherit;color:inherit}
-button{cursor:pointer;border:0;background:none;touch-action:manipulation}
-.hidden{display:none!important}
-.av{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;font-weight:600;color:#fff}
-.av.s{width:34px;height:34px;font-size:13px}
-.av.lg{width:80px;height:80px;font-size:28px;margin:0 auto 10px}
+const clean = u => String(u || '').toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_.]/g, '').slice(0, 20);
+const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+const dmId = (a, b) => 'dm:' + [a, b].sort().join(':');
+const EMOJI = ['❤️', '😂', '👍', '😮', '🔥'];
 
-.bl{width:14px;height:14px;vertical-align:-2px;margin-left:4px}
-.bl.red circle{fill:#ff4757!important}
-.bl.orange circle{fill:#ffa502!important}
-.bl.yellow circle{fill:#eccc68!important}
-.bl.blue circle{fill:#2f81f7!important}
+// sisa akun bot lama (dibersihin otomatis dari database)
+const LEGACY_BOT = 'albot';
 
-input,textarea{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;outline:none}
-input:focus,textarea:focus{border-color:var(--ac)}
-.btn{background:var(--ac);color:#06281b;font-weight:600;padding:10px 16px;border-radius:10px}
-.btn.g{background:var(--panel);color:var(--tx);border:1px solid var(--line)}
-.btn.danger{background:#ff6b6b;color:#fff}
-.btn:disabled{opacity:.4}
-
-.wa-channel-btn{
-  display:flex;align-items:center;gap:8px;padding:9px 12px;margin:8px 12px 2px;
-  background:#25d36618;border:1px solid #25d36655;border-radius:10px;
-  color:#25d366;font-weight:600;font-size:12.5px;text-decoration:none;
-}
-.wa-channel-btn:active{background:#25d36633}
-
-.auth{min-height:100%;display:grid;place-items:center;padding:20px;width:100%}
-.card{width:100%;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
-.card h1{font-size:20px;margin-bottom:4px}.card p{color:var(--mu);font-size:12px;margin-bottom:12px}
-.card label{display:block;font-size:11px;color:var(--mu);margin:8px 0 4px}
-.err{color:#ff6b6b;font-size:12px;min-height:16px;margin:8px 0 2px}
-
-.app{display:flex;flex-direction:column;height:100%;position:relative}
-.side{display:flex;flex-direction:column;height:100%;position:relative;background:var(--bg)}
-.mebar{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line)}
-.mebar .nm{flex:1;min-width:0}.nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}.nm span{color:var(--mu);font-size:12px}
-.ico{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:16px;color:var(--mu)}
-.ico:active{background:var(--panel)}
-.sbox{padding:8px 12px}
-#list{overflow-y:auto;flex:1;padding-bottom:80px}
-.sec{padding:8px 14px 4px;font-size:11px;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
-.item{display:flex;gap:10px;padding:10px 12px;align-items:center;cursor:pointer}
-.item:active,.item.on{background:var(--panel)}
-.item .m{flex:1;min-width:0}.item .t{display:flex;justify-content:space-between;gap:8px}
-.item .t b{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.item .t small{color:var(--mu);font-size:11px;flex:none}
-.item .p{color:var(--mu);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;justify-content:space-between}
-.un{background:var(--ac);color:#06281b;font-size:11px;font-weight:700;border-radius:8px;padding:1px 6px;margin-left:6px}
-.pinned-tag{font-size:11px;color:var(--ac);margin-right:4px}
-.fab{position:absolute;right:16px;bottom:20px;width:50px;height:50px;border-radius:14px;background:var(--ac);color:#06281b;font-size:24px;box-shadow:0 6px 16px #0008;z-index:10;display:grid;place-items:center}
-
-#chat{position:absolute;inset:0;background:var(--bg);z-index:20;display:flex;flex-direction:column}
-.ch{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--bg)}
-.ch .nm{flex:1;min-width:0;cursor:pointer}
-#msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:4px;background:radial-gradient(#ffffff08 1px,transparent 1px) 0 0/20px 20px}
-.row{display:flex;flex-direction:column;align-items:flex-start;max-width:100%}.row.me{align-items:flex-end}
-.b{max-width:82%;background:var(--other);border-radius:12px 12px 12px 2px;padding:7px 10px 5px;word-wrap:break-word;overflow-wrap:anywhere;position:relative}
-.row.me .b{background:var(--mine);border-radius:12px 12px 2px 12px}
-.who{font-size:11.5px;font-weight:600;color:var(--ac);margin-bottom:1px}
-.meta{font-size:10px;color:var(--mu);text-align:right;margin-top:1px;display:flex;align-items:center;justify-content:flex-end;gap:2px}
-.rb,.del-btn{font-size:11px;opacity:.6;padding:0 2px;background:none;border:none;cursor:pointer}
-.del-btn:hover{opacity:1;color:#ff6b6b}
-.b code{background:#0006;padding:1px 4px;border-radius:4px;font-family:ui-monospace,monospace;font-size:12px}
-.sp{background:#8a91a0;color:transparent;border-radius:4px;cursor:pointer}.sp.on{background:none;color:inherit}
-.rx{display:flex;gap:4px;margin-top:2px}.rx span{background:var(--panel);border:1px solid var(--line);border-radius:8px;font-size:11px;padding:0 6px;cursor:pointer}
-.rx span.mine{border-color:var(--ac)}
-.pk{position:fixed;z-index:50;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 10px;display:flex;gap:8px;font-size:20px;box-shadow:0 6px 16px #0009}
-.pk span{cursor:pointer}
-
-.comp{display:flex;gap:8px;padding:8px 10px;border-top:1px solid var(--line);background:var(--panel);align-items:center}
-.comp input{border-radius:20px;padding:8px 12px;font-size:13px}
-.comp .btn{border-radius:20px;padding:0 14px;height:36px;font-size:13px}
-.hint{font-size:11px;color:var(--mu);text-align:center;padding:0 10px 4px}
-
-.chat-search-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
-.chat-search-bar input{border-radius:8px;padding:6px 10px;font-size:12.5px}
-
-.modal{position:absolute;inset:0;background:#000a;display:grid;place-items:center;padding:16px;z-index:40;overflow:auto}
-.box{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:360px;padding:16px;max-height:92dvh;overflow:auto}
-.box h3{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-size:16px}
-.box label{display:block;font-size:11px;color:var(--mu);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.04em}
-.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
-
-.action-sheet{position:absolute;bottom:0;left:0;right:0;background:var(--panel);border-radius:16px 16px 0 0;padding:12px;z-index:45;border-top:1px solid var(--line)}
-.action-item{display:flex;align-items:center;gap:10px;padding:12px;width:100%;font-size:14px;color:var(--tx);border-radius:8px;text-align:left}
-.action-item:active{background:var(--bg)}
-
-.member-list-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #ffffff08}
-.member-list-item .m-info{flex:1;min-width:0}
-.member-list-item .m-info b{display:block;font-size:13px}
-.member-list-item .m-info span{font-size:11px;color:var(--mu)}
-.member-list-item .m-role{font-size:10px;background:#ffffff10;padding:2px 5px;border-radius:4px;color:var(--ac);margin-left:auto}
-
-.code{font-family:ui-monospace,monospace;color:#6cb6ff;background:var(--bg);padding:8px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;word-break:break-all;font-size:12px}
-#toast{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:#222833;border:1px solid var(--line);padding:8px 14px;border-radius:10px;z-index:60;max-width:90vw;opacity:0;pointer-events:none;transition:.2s;font-size:12px}
-#toast.on{opacity:1}
-
-/* ===== layar lebar: body gelap, aplikasi di tengah ===== */
-html,body{background:#07080b}
-
-/* ===== animasi halus ===== */
-:root{--ease:cubic-bezier(.22,.9,.3,1)}
-#chat{transition:transform .32s var(--ease),opacity .25s ease,visibility 0s}
-#chat.hidden{display:flex!important;transform:translateX(100%);opacity:.5;visibility:hidden;pointer-events:none;transition:transform .3s var(--ease),opacity .2s ease,visibility 0s .3s}
-.modal{transition:opacity .2s ease,visibility 0s}
-.modal.hidden{display:grid!important;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .2s ease,visibility 0s .2s}
-.modal .box{transition:transform .28s var(--ease)}
-.modal.hidden .box{transform:translateY(16px) scale(.95)}
-#actionSheetModal .action-sheet{transition:transform .3s var(--ease)}
-#actionSheetModal.hidden .action-sheet{transform:translateY(100%)}
-.item,.btn,.ico,.fab,.action-item{transition:background .15s ease,transform .15s ease,opacity .15s ease}
-.item:active{transform:scale(.985)}
-.btn:active,.fab:active{transform:scale(.94)}
-.ico:active{transform:scale(.88)}
-#toast{transform:translate(-50%,-10px);transition:opacity .25s ease,transform .3s var(--ease)}
-#toast.on{transform:translate(-50%,0)}
-@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
-@keyframes flash{0%,100%{box-shadow:0 0 0 0 transparent}30%{box-shadow:0 0 0 3px #3ddc9799}}
-@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.row.new .b{animation:pop .26s var(--ease) both}
-.row.me.new .b{transform-origin:100% 100%}
-.row:not(.me).new .b{transform-origin:0 100%}
-.row.hl .b{animation:flash 1.3s ease}
-#msgs{scroll-behavior:auto}
-
-/* ===== balas / edit ===== */
-.ctx-bar{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;background:var(--panel);border-top:1px solid var(--line);border-left:3px solid var(--ac);animation:fadeUp .2s var(--ease)}
-.ctx-bar .ctx-in{flex:1;min-width:0}
-.ctx-bar b{display:block;font-size:12px;color:var(--ac)}
-.ctx-bar span{display:block;font-size:12.5px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.qt{border-left:3px solid var(--ac);background:#0004;border-radius:6px;padding:3px 8px;margin-bottom:4px;cursor:pointer;max-width:100%}
-.qt b{display:block;font-size:11.5px;color:var(--ac)}
-.qt span{display:block;font-size:12.5px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
-.edited-tag{opacity:.7;font-style:italic;margin-right:3px}
-
-/* ===== sedang mengetik ===== */
-.tp{color:var(--ac)}
-.dots{display:inline-flex;gap:2px;margin-left:4px;vertical-align:1px}
-.dots i{width:3.5px;height:3.5px;border-radius:50%;background:currentColor;animation:dot 1.2s infinite ease-in-out}
-.dots i:nth-child(2){animation-delay:.18s}.dots i:nth-child(3){animation-delay:.36s}
-@keyframes dot{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
-
-select{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;color:inherit;font:inherit;outline:none}
-select:focus{border-color:var(--ac)}
-.stk{width:150px;height:150px;object-fit:contain;display:block;background:transparent}
-.stk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
-.stk-wrap{position:relative}
-.stk-del{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:#ff4d4d;color:#fff;border:0;font-size:12px;line-height:22px;padding:0;cursor:pointer}
-.stk-cell{aspect-ratio:1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;display:grid;place-items:center;overflow:hidden}
-.stk-cell img,.stk-cell video{width:100%;height:100%;object-fit:contain}
-.mt{color:var(--ac);font-weight:600;background:#3ddc9722;border-radius:5px;padding:0 3px;cursor:pointer}
-.mt.me{background:#ffd23f33;color:#ffd23f}
-#chat{position:relative}
-.mention-box{position:absolute;left:10px;right:10px;bottom:70px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px;z-index:20;box-shadow:0 8px 24px #000a;max-height:280px;overflow:auto}
-.mention-box.hidden{display:none!important}
-.mention-box button{display:flex;gap:10px;align-items:center;width:100%;padding:8px;border-radius:10px;text-align:left}
-.mention-box button:hover{background:var(--bg)}
-.mention-box small{color:var(--mu)}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-</style>
-</head>
-<body>
-
-<div class="app-container">
-  <div id="auth" class="auth hidden">
-    <div class="card">
-      <h1>Ngobrol</h1>
-      <p>Ketik username kamu. Akun otomatis tersimpan di HP ini.</p>
-      <label>Username</label>
-      <input id="rUser" maxlength="20" placeholder="contoh: aldev" autocapitalize="none" autocomplete="off">
-      <label>Nama (Khusus Pengguna Baru)</label>
-      <input id="rName" maxlength="30" placeholder="Nama kamu (jika baru daftar)">
-      <div id="recBox" class="hidden">
-        <label>Kode pemulihan</label>
-        <input id="recKey" type="password" placeholder="kode rahasia owner" autocomplete="off">
-      </div>
-      <div class="err" id="aErr"></div>
-      <button class="btn" style="width:100%; margin-top:10px;" id="aGo">Masuk / Daftar</button>
-    </div>
-  </div>
-
-  <div id="app" class="app hidden">
-    <aside class="side">
-      <div class="mebar">
-        <div id="meAv"></div>
-        <div class="nm"><b id="meName"></b><span id="meUser"></span></div>
-        <button class="ico" id="gear" title="Pengaturan">⚙</button>
-      </div>
-      
-      <a href="https://whatsapp.com/channel/0029VbDanaD4yltW4XVITR1q" target="_blank" class="wa-channel-btn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm5.82 14.12c-.24.68-1.22 1.24-1.7 1.3-.44.06-1.01.09-3.23-.82-2.83-1.17-4.66-4.04-4.8-4.23-.14-.19-1.15-1.53-1.15-2.92 0-1.39.73-2.07.99-2.35.26-.28.57-.35.76-.35.19 0 .38 0 .54.01.18.01.42-.07.65.49.24.57.82 2 .89 2.15.07.15.12.33.02.52-.1.19-.15.31-.29.48-.14.17-.3.38-.43.51-.14.14-.29.3-.13.58.16.28.72 1.19 1.55 1.93 1.07.95 1.97 1.25 2.25 1.39.28.14.44.12.6-.07.16-.19.68-.79.86-1.06.18-.27.36-.23.6-.14.24.09 1.53.72 1.79.85.26.13.43.19.49.3.06.11.06.63-.18 1.31z"/>
-        </svg>
-        Channel Developer
-      </a>
-
-      <div class="sbox"><input id="q" placeholder="Cari chat atau nama orang..." autocomplete="off"></div>
-      <div id="list"></div>
-      <button class="fab" id="fab">+</button>
-    </aside>
-
-    <section id="chat" class="hidden">
-      <div class="ch">
-        <button class="ico" id="back">←</button>
-        <div id="cAv" onclick="checkGroupInfoClick()"></div>
-        <div class="nm" onclick="checkGroupInfoClick()">
-          <b id="cName"></b>
-          <span id="cSub" style="color:var(--mu);font-size:11.5px"></span>
-        </div>
-        <button class="ico" id="cMenuBtn" title="Menu Opsi">⋮</button>
-      </div>
-
-      <div id="chatSearchBar" class="chat-search-bar hidden">
-        <input id="inChatSearchInput" placeholder="Cari pesan di chat ini..." autocomplete="off">
-        <button class="btn g" onclick="closeInChatSearch()" style="padding:4px 10px;height:auto;font-size:12px;">Tutup</button>
-      </div>
-
-      <div id="msgs"></div>
-      <div class="hint">Format: *tebal* _miring_ ~coret~ `kode` ||spoiler|| · tap 2x pesan buat ❤️</div>
-      <div id="ctxBar" class="ctx-bar hidden">
-        <div class="ctx-in"><b id="ctxT"></b><span id="ctxX"></span></div>
-        <button class="ico" onclick="cancelCtx()" title="Batal">✕</button>
-      </div>
-      <div class="comp">
-        <input id="inp" placeholder="Tulis pesan..." maxlength="2000" autocomplete="off">
-        <button class="btn g" id="stkBtn" title="Stiker">😺</button>
-        <button class="btn g" id="vnBtn" title="Tekan untuk Rekam VN">🎙️</button>
-        <button class="btn danger hidden" id="cancelVnBtn" title="Batalkan VN">🛑</button>
-        <button class="btn" id="send">Kirim</button>
-      </div>
-    </section>
-  </div>
-
-  <div id="actionSheetModal" class="modal hidden" onclick="closeActionSheet(event)">
-    <div class="action-sheet" id="actionSheetBox"></div>
-  </div>
-
-  <div id="modal" class="modal hidden"><div class="box" id="box"></div></div>
-  <div id="toast"></div>
-</div>
-
-<script>
-const $ = s => document.querySelector(s);
-let myUsername = localStorage.getItem('myUsername') || null;
-let me = null, chats = [], active = null, msgs = [], start = 0, ver = '', prof = {}, prevCount = null, timer, people = [];
-let replyTo = null, editingIdx = null, curMod = false;
-let mentionCache = {}, seenLast = {};
-let rendered = new Set(), firstRender = true, stick = false;
-let subBase = '', typingNames = [], typingKey = '', lastHb = 0, lastTyping = 0;
-let pinnedChats = JSON.parse(localStorage.getItem('pinnedChats') || '[]');
-let archivedChats = JSON.parse(localStorage.getItem('archivedChats') || '[]');
-let mutedChats = JSON.parse(localStorage.getItem('mutedChats') || '[]');
-
-let seen = JSON.parse(localStorage.getItem('seen') || '{}');
-const saveSeen = () => localStorage.setItem('seen', JSON.stringify(seen));
-
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmt = s => esc(s)
-  .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-  .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$|[.,!?])/g, '$1<b>$2</b>')
-  .replace(/(^|\s)_([^_\n]+)_(?=\s|$|[.,!?])/g, '$1<i>$2</i>')
-  .replace(/(^|\s)~([^~\n]+)~(?=\s|$|[.,!?])/g, '$1<s>$2</s>')
-  .replace(/\|\|([^|\n]+)\|\|/g, '<span class="sp" onclick="this.classList.toggle(\'on\')">$1</span>')
-  .replace(/(^|\s)@([a-z0-9_.]{3,20})(?![a-z0-9_.])/gi, (x, p, u) => p + '<span class="mt' + (u.toLowerCase() === myUsername ? ' me' : '') + '" onclick="startDm(\'' + u.toLowerCase() + '\')">@' + u + '</span>')
-  .replace(/\n/g, '<br>');
-
-const getBadgeSvg = (color = 'blue') => {
-  const rainbow = color === 'rainbow';
-  const defs = rainbow ? '<defs><linearGradient id="ckRb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff3b3b"/><stop offset=".25" stop-color="#ffd23f"/><stop offset=".5" stop-color="#3ddc97"/><stop offset=".75" stop-color="#2f81f7"/><stop offset="1" stop-color="#b56bff"/></linearGradient></defs>' : '';
-  const fill = rainbow ? 'url(#ckRb)' : '#2f81f7';
-  return `<svg class="bl ${color}" viewBox="0 0 24 24">${defs}<circle cx="12" cy="12" r="11" fill="${fill}"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-};
-
-const nameOf = u => (prof[u] && prof[u].name) || u;
-const badge = u => {
-  if (!prof[u] || !prof[u].v) return '';
-  return getBadgeSvg(prof[u].badgeColor || 'blue');
-};
-
-const hue = s => ([...s].reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 360;
-const avText = (text, seed, cls = '') => `<div class="av ${cls}" style="background:hsl(${hue(seed)} 35% 38%)">${esc((text || '?')[0]).toUpperCase()}</div>`;
-const avUser = (u, cls = '') => {
-  if (prof[u] && prof[u].a) {
-    const src = typeof prof[u].a === 'string' && prof[u].a.startsWith('http') ? prof[u].a : `/api/avatar/${u}?t=${prof[u].a}`;
-    return `<img class="av ${cls}" src="${src}">`;
+const SYSTEM_CONFIG = {
+  mainGroupId: "global",
+  mainGroupName: "Global Group",
+  mainGroupAvatar: "https://files.catbox.moe/5k43y6.jpg",
+  devBadgeColor: {
+    rainbow: true,
+    red: false,
+    orange: false,
+    yellow: false,
+    blue: false
   }
-  return avText(nameOf(u), u, cls);
 };
 
-const time = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 2600); }
-
-/* kunci perangkat: bukti kalau ini HP yang dulu dipakai bikin akun (biar nggak ke-lock pas IP ganti) */
-const cleanU = u => String(u || '').toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_.]/g, '').slice(0, 20);
-const devKeys = () => { try { return JSON.parse(localStorage.getItem('devKeys') || '{}'); } catch (e) { return {}; } };
-function setDevKey(u, k) { const d = devKeys(); d[u] = k; localStorage.setItem('devKeys', JSON.stringify(d)); }
-
-async function api(path, body) {
-  const who = (path === 'register' && body) ? cleanU(body.username) : myUsername;
-  const o = { headers: { 'x-user': myUsername || who || '', 'x-device': devKeys()[who] || '', 'content-type': 'application/json' } };
-  if (path === 'register' && body) o.headers['x-user'] = who;
-  if (body) { o.method = 'POST'; o.body = JSON.stringify(body); }
-  const r = await fetch('/api/' + path, o);
-  const nd = r.headers.get('x-device');
-  if (nd && who && devKeys()[who] !== nd) setDevKey(who, nd);
-  const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && myUsername) logout();
-  if (r.status === 403 && j.blocked && myUsername) { sessionStorage.setItem('authErr', j.error || ''); logout(); }
-  if (!r.ok) { const err = new Error(j.error || 'Gagal'); err.blocked = !!j.blocked; throw err; }
-  return j;
+function getDevBadgeColor() {
+  const c = SYSTEM_CONFIG.devBadgeColor;
+  if (c.rainbow) return 'rainbow';
+  if (c.red) return 'red';
+  if (c.orange) return 'orange';
+  if (c.yellow) return 'yellow';
+  return 'blue';
 }
 
-async function ensureProfiles(list, force) {
-  const u = [...new Set(list.filter(Boolean))].filter(x => force || !(x in prof));
-  if (!u.length) return;
-  const r = await api('profiles', { users: u });
-  u.forEach(x => (prof[x] = r[x] || { name: x }));
+const h = fn => (req, res) =>
+  Promise.resolve(fn(req, res)).catch(e => {
+    console.error(e);
+    res.status(500).json({ error: 'Server lagi error, coba lagi' });
+  });
+
+// ---------- Akun dikunci ke IP pembuatnya ----------
+// Kalau IP beda DAN perangkatnya bukan perangkat yang dulu dipakai bikin akun -> ditolak.
+// Kunci perangkat (x-device) dipakai biar pemilik akun nggak ke-lock sendiri waktu IP HP-nya
+// ganti (data seluler / pindah wifi). Orang lain nggak punya kunci itu.
+const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000];
+const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter // mati, 1 jam, 24 jam, 7 hari, 30 hari
+const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
+const BLOCK_MSG = 'Username sudah digunakan, gunakan username lain';
+const bindCache = new Map();
+
+function ipOf(req) {
+  let ip = req.get('x-vercel-forwarded-for') || req.get('x-real-ip') || req.get('x-forwarded-for') || (req.socket && req.socket.remoteAddress) || '';
+  ip = String(ip).split(',')[0].trim().replace(/^::ffff:/, '');
+  // IPv6: HP sering ganti bagian belakangnya, jadi yang dibandingin 64 bit depan aja
+  if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':');
+  return ip;
+}
+const cacheBind = (u, b) => bindCache.set(u, { b, exp: Date.now() + 60000 });
+async function getBind(u) {
+  const c = bindCache.get(u);
+  if (c && c.exp > Date.now()) return c.b;
+  const b = await redis.get('bind:' + u);
+  if (b) cacheBind(u, b);
+  return b;
+}
+async function forceBind(u, req) {
+  const b = { ip: ipOf(req), dev: crypto.randomBytes(12).toString('hex'), t: Date.now() };
+  await redis.set('bind:' + u, b);
+  cacheBind(u, b);
+  return { ok: true, dev: b.dev };
+}
+// -> { ok:true, dev } | { ok:false, nouser?:true }
+async function checkBind(u, req) {
+  const ip = ipOf(req), dev = String(req.get('x-device') || '');
+  let b = await getBind(u);
+  if (!b) {
+    // belum ada ikatan: JANGAN diklaim orang yang login duluan. Harus lewat kode pemulihan.
+    if (!(await redis.exists('user:' + u))) return { ok: false, nouser: true };
+    return { ok: false };
+  }
+  const sameIp = !!ip && b.ip === ip;
+  const sameDev = !!dev && dev === b.dev;
+  if (!sameIp && !sameDev) return { ok: false };
+  if (!sameIp) { b.ip = ip; await redis.set('bind:' + u, b); cacheBind(u, b); } // perangkat sama, IP baru -> IP baru dipercaya
+  return { ok: true, dev: b.dev };
 }
 
-$('#aGo').onclick = async () => {
-  $('#aErr').textContent = '';
+async function auth(req, res, next) {
   try {
-    const body = { name: $('#rName').value, username: $('#rUser').value };
-    if (!$('#recBox').classList.contains('hidden') && $('#recKey').value) body.recoverKey = $('#recKey').value;
-    const r = await api('register', body);
-    myUsername = r.username;
-    localStorage.setItem('myUsername', myUsername);
-    boot();
+    const u = clean(req.get('x-user'));
+    if (!u) return res.status(401).json({ error: 'Belum login' });
+    const r = await checkBind(u, req);
+    if (r.nouser) return res.status(401).json({ error: 'Akun tidak ditemukan' });
+    if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
+    res.set('x-device', r.dev);
+    req.u = u;
+    next();
   } catch (e) {
-    $('#aErr').textContent = e.message;
-    if (e.blocked) $('#recBox').classList.remove('hidden');
-  }
-};
-
-function logout() { localStorage.removeItem('myUsername'); localStorage.removeItem('seen'); location.reload(); }
-
-async function boot() {
-  $('#auth').classList.add('hidden'); 
-  $('#app').classList.remove('hidden');
-  try {
-    me = await api('me');
-    prof[me.username] = { name: me.name, v: me.verified || me.username === 'aldev', badgeColor: me.devBadgeColor || 'blue', a: me.av };
-    drawMe();
-    await loadChats();
-    tick();
-  } catch(e) { logout(); }
-}
-
-function drawMe() {
-  const color = me.devBadgeColor || 'blue';
-  const badgeSvg = (me.verified || me.username === 'aldev') ? getBadgeSvg(color) : '';
-  $('#meAv').innerHTML = avUser(me.username);
-  $('#meName').innerHTML = esc(me.name) + badgeSvg;
-  $('#meUser').textContent = '@' + me.username;
-}
-
-async function tick() {
-  try {
-    const hb = Date.now() - lastHb > 15000;
-    const j = await api('sync?chat=' + encodeURIComponent(active || '') + (hb ? '&hb=1' : ''));
-    if (hb) lastHb = Date.now();
-    if (j.v !== ver) { ver = j.v; await loadChats(); if (active) await loadMessages(); }
-    // timer hapus otomatis: pesan yang udah lewat waktunya langsung hilang dari layar
-    const cc = chats.find(x => x.id === active);
-    if (cc && cc.ttl && msgs.some(m => Date.now() - m.ts >= cc.ttl * 1000)) await loadMessages();
-    if (j.chat === (active || '')) handleTyping(j.typing || []);
-  } catch (e) {}
-  clearTimeout(timer);
-  timer = setTimeout(tick, document.hidden ? 15000 : (active ? 2500 : 4000));
-}
-
-async function handleTyping(list) {
-  const names = list.filter(u => u !== myUsername);
-  if (names.length) { try { await ensureProfiles(names); } catch (e) {} }
-  const key = names.join(',');
-  if (key === typingKey) return;
-  typingKey = key; typingNames = names;
-  renderSub();
-}
-
-function renderSub() {
-  const el = $('#cSub');
-  if (typingNames.length) {
-    const n = typingNames.map(nameOf);
-    const t = n.length === 1 ? n[0] : n.length === 2 ? n.join(' dan ') : n.length + ' orang';
-    el.innerHTML = `<span class="tp">${esc(t)} sedang mengetik<span class="dots"><i></i><i></i><i></i></span></span>`;
-  } else {
-    const c = chats.find(x => x.id === active);
-    el.textContent = subBase + (c && c.ttl ? ' · ⏳ ' + TTL_LABEL[c.ttl] : '');
+    console.error(e);
+    res.status(500).json({ error: 'Server lagi error, coba lagi' });
   }
 }
 
-const TTL_LABEL = { 0: 'Mati', 3600: '1 jam', 86400: '24 jam', 604800: '7 hari', 2592000: '30 hari' };
-
-const unread = c => (c.id === active && !document.hidden) ? 0 : Math.max(0, c.count - (seen[c.id] ?? 0));
-
-async function loadChats() {
-  const list = await api('chats');
-  await ensureProfiles([...list.filter(c => c.type === 'dm').map(c => c.other), ...list.map(c => c.last && c.last.u)], true);
-  checkNotifs(list);
-  chats = list;
-  renderList();
-  if (active) renderSub();
-}
-
-function beep() {
-  try {
-    const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain();
-    o.connect(g); g.connect(a.destination); o.frequency.value = 760;
-    g.gain.setValueAtTime(0.12, a.currentTime); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.25);
-    o.start(); o.stop(a.currentTime + 0.25);
-  } catch (e) {}
-}
-function checkNotifs(list) {
-  list.forEach(c => {
-    const l = c.last;
-    if (!l) return;
-    const prev = seenLast[c.id];
-    seenLast[c.id] = l.ts;
-    if (prev === undefined || l.ts <= prev || l.u === myUsername) return;
-    const tag = !!(l.mn && l.mn.includes(myUsername));
-    if (!tag && c.id === active && !document.hidden) return;   // lagi buka chat ini
-    if (!tag && mutedChats.includes(c.id)) return;             // chat dibisukan
-    const who = c.type === 'dm' ? nameOf(c.other) : c.title;
-    const body = (c.type === 'dm' ? '' : nameOf(l.u) + ': ') + previewOf(l).slice(0, 100);
-    const title = (tag ? '📣 ' : '') + who;
-    beep(); if (navigator.vibrate) navigator.vibrate(120);
-    if (!document.hidden) toast(title + ' — ' + body);
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try { new Notification(title, { body, tag: c.id }); } catch (e) {}
-    }
-  });
-}
-
-function renderList() {
-  const q = $('#q').value.trim().toLowerCase();
-  const title = c => c.type === 'dm' ? nameOf(c.other) : c.title;
-  
-  const show = chats.filter(c => {
-    if (archivedChats.includes(c.id)) return false;
-    return !q || title(c).toLowerCase().includes(q) || (c.other || '').includes(q);
-  }).sort((a, b) => {
-    const aPin = pinnedChats.includes(a.id) ? 1 : 0;
-    const bPin = pinnedChats.includes(b.id) ? 1 : 0;
-    if (aPin !== bPin) return bPin - aPin;
-    return ((b.last && b.last.ts) || 0) - ((a.last && a.last.ts) || 0);
-  });
-
-  let html = show.map(c => {
-    const u = unread(c);
-    const msgText = c.last ? (previewOf(c.last) || '🎙️ Pesan suara') : '';
-    const prev = c.last ? (c.type === 'dm' ? '' : (c.last.u === myUsername ? 'Kamu' : nameOf(c.last.u)) + ': ') + msgText : (c.type === 'global' ? 'Ruang bersama' : 'Belum ada pesan');
-    
-    let aHtml = c.type === 'dm' ? avUser(c.other) : (c.avatar ? `<img class="av" src="${c.avatar}">` : avText(title(c), c.id));
-    const isVerifiedGroup = c.id === 'global' || c.verified;
-    const isPinned = pinnedChats.includes(c.id);
-
-    return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${aHtml}<div class="m">
-      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
-      <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `<span class="un">${u}</span>` : ''}</div></div></div></div>`;
-  }).join('');
-
-  if (!show.length && !people.length) html = '<div style="padding:20px;text-align:center;color:var(--mu)">Belum ada chat.</div>';
-  if (people.length) {
-    html += '<div class="sec">Orang</div>' + people.map(p => {
-      prof[p.username] = prof[p.username] || { name: p.name, v: p.v, badgeColor: p.badgeColor || 'blue', a: p.a };
-      return `<div class="item" onclick="startDm('${p.username}')">${avUser(p.username)}<div class="m"><div class="t"><b>${esc(p.name)}${badge(p.username)}</b></div><div class="p">@${p.username}</div></div></div>`;
-    }).join('');
+async function access(u, chat) {
+  chat = String(chat || '');
+  if (chat === 'global') return { ok: true, members: null };
+  if (chat.startsWith('dm:')) {
+    const p = chat.slice(3).split(':');
+    if (p.length !== 2 || !p.includes(u) || p[0] === p[1]) return { ok: false };
+    const other = p.find(x => x !== u);
+    if (!(await redis.exists('user:' + other))) return { ok: false };
+    return { ok: true, members: p };
   }
-  $('#list').innerHTML = html;
-}
-
-let qt;
-$('#q').oninput = () => {
-  renderList(); clearTimeout(qt);
-  const q = $('#q').value.trim();
-  if (q.length < 2) { people = []; return renderList(); }
-  qt = setTimeout(async () => { try { people = await api('users?q=' + encodeURIComponent(q)); renderList(); } catch (e) {} }, 350);
-};
-
-async function openChat(id) {
-  active = id; msgs = [];
-  rendered = new Set(); firstRender = true; stick = false; typingNames = []; typingKey = ''; subBase = ''; clearCtx(); renderSub();
-  const c = chats.find(x => x.id === id);
-  if (c) seen[id] = c.count; saveSeen();
-  $('#chat').classList.remove('hidden');
-  const t = c ? (c.type === 'dm' ? nameOf(c.other) : c.title) : '';
-  const isVerifiedGroup = id === 'global';
-  const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '');
-  
-  $('#cName').innerHTML = esc(t) + headerBadge;
-  $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
-
-  updateHeaderSub();
-  $('#msgs').innerHTML = '';
-  renderList();
-  await loadMessages();
-  $('#inp').focus();
-}
-
-async function updateHeaderSub() {
-  if (!active) return;
-  const c = chats.find(x => x.id === active);
-  if (c && c.type === 'dm') {
-    subBase = '@' + c.other; renderSub();
-    return;
+  if (chat.startsWith('grp:')) {
+    const g = await redis.get('group:' + chat.slice(4));
+    if (!g || !g.members.includes(u)) return { ok: false };
+    return { ok: true, members: g.members, group: g };
   }
+  return { ok: false };
+}
+
+const bump = (chat, members) =>
+  chat === 'global' ? redis.incr('ver:global') : Promise.all((members || []).map(m => redis.incr('ver:' + m)));
+
+async function missions(u, me) {
+  const [msgs, reacts, contacts, days] = await Promise.all([
+    redis.get('msgs:' + u), redis.get('reacts:' + u), redis.scard('contacts:' + u), redis.scard('days:' + u),
+  ]);
+  return [
+    { t: 'Kirim 30 pesan', n: +msgs || 0, max: 30 },
+    { t: 'Kasih react ke 5 pesan', n: +reacts || 0, max: 5 },
+    { t: 'Tambah 5 kontak', n: contacts, max: 5 },
+    { t: 'Aktif di 3 hari berbeda', n: days, max: 3 },
+    { t: 'Lengkapi profil (nama, bio, foto)', n: me.name && me.bio && me.av ? 1 : 0, max: 1 },
+  ].map(m => ({ ...m, n: Math.min(m.n, m.max) }));
+}
+
+// Bersihin sisa akun bot lama dari database (jalan sekali tiap server start)
+(async () => {
   try {
-    const res = await api('group-members?chat=' + encodeURIComponent(active));
-    subBase = `${res.onlineCount} online · ${res.total} member`; renderSub();
-  } catch(e) {
-    subBase = 'Grup'; renderSub();
-  }
-}
-
-function checkGroupInfoClick() {
-  const c = chats.find(x => x.id === active);
-  if (c && c.type !== 'dm') showGroupInfo();
-}
-
-async function showGroupInfo() {
-  if (!active) return;
-  const c = chats.find(x => x.id === active);
-  if (!c || c.type === 'dm') return;
-
-  try {
-    const res = await api('group-members?chat=' + encodeURIComponent(active));
-    const title = c.title;
-
-    let myRole = 'member';
-    const meObj = res.members.find(m => m.username === myUsername);
-    if (meObj) myRole = meObj.role;
-
-    let memberHtml = res.members.map(m => {
-      prof[m.username] = { name: m.name, v: m.v, badgeColor: m.badgeColor, a: m.a };
-      const canManage = (myRole === 'owner' || myRole === 'admin') && m.username !== myUsername && m.username !== 'aldev';
-
-      return `<div class="member-list-item">
-        <div onclick="startDm('${m.username}')" style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer">
-          ${avUser(m.username, 's')}
-          <div class="m-info">
-            <b>${esc(m.name)}${badge(m.username)}</b>
-            <span>@${m.username} ${m.online ? '· <span style="color:var(--ac)">Online</span>' : ''}</span>
-          </div>
-        </div>
-        <span class="m-role">${m.role.toUpperCase()}</span>
-        ${canManage && m.role === 'member' ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="setRole('${m.username}','promote')">⬆ Admin</button>` : ''}
-        ${canManage && m.role === 'admin' && myRole === 'owner' ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="setRole('${m.username}','demote')">⬇ Admin</button>` : ''}
-        ${canManage && c.type === 'group' && m.role !== 'admin' ? `<button class="btn danger" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="kickMember('${m.username}')">Kick</button>` : ''}
-      </div>`;
-    }).join('');
-
-    const isMember = !!meObj;
-    const canDeleteGroup = c.type === 'group' && c.id !== 'global' && (myRole === 'owner' || myUsername === 'aldev');
-    const canLeaveGroup = c.type === 'group' && c.id !== 'global' && isMember && myRole !== 'owner';
-    let groupHeaderAv = c.avatar ? `<img class="av lg" src="${c.avatar}">` : avText(title, c.id, 'lg');
-
-    modal(`
-      <div style="text-align:center">
-        ${groupHeaderAv}
-        <h2 style="font-size:18px;">${esc(title)}</h2>
-        <p style="color:var(--mu);font-size:12px;">Ruang bersama (${res.onlineCount} online dari ${res.total} member)</p>
-      </div>
-      <label style="margin-top:12px;">Kode / Link Undangan Grup</label>
-      <div class="code"><span>${c.code}</span><button class="btn" onclick="copy('${c.code}')">Salin Kode</button></div>
-      <label style="margin-top:16px;">Daftar Anggota (${res.total})</label>
-      <div style="max-height:200px;overflow:auto;margin-top:6px">${memberHtml}</div>
-      ${(canLeaveGroup || canDeleteGroup) ? `<div class="acts" style="justify-content:space-between;margin-top:16px">
-        ${canLeaveGroup ? `<button class="btn g" style="color:#ff6b6b" onclick="leaveGroup()">🚪 Keluar grup</button>` : '<span></span>'}
-        ${canDeleteGroup ? `<button class="btn danger" onclick="deleteGroup()">🗑️ Hapus grup</button>` : ''}
-      </div>` : ''}
-    `);
-  } catch(e) { toast(e.message); }
-}
-
-async function setRole(u, action) {
-  const c = chats.find(x => x.id === active);
-  if (!c) return;
-  try {
-    await api('groups/update', { code: c.type === 'global' ? 'global' : c.code, action, targetUser: u });
-    toast(action === 'promote' ? 'Dijadikan admin' : 'Admin dicabut');
-    await showGroupInfo();
-  } catch (e) { toast(e.message); }
-}
-
-async function removeSticker(id) {
-  if (!confirm('Hapus stiker ini dari koleksimu?')) return;
-  try { await api('stickers/remove', { id }); toast('Stiker dihapus'); openStickerTray(); }
-  catch (e) { toast(e.message); }
-}
-
-async function kickMember(u) {
-  const c = chats.find(x => x.id === active);
-  if (!c || c.type !== 'group') return;
-  if (!confirm('Keluarkan ' + nameOf(u) + ' dari grup?')) return;
-  try {
-    await api('groups/update', { code: c.code, action: 'kick', targetUser: u });
-    toast('Anggota dikeluarkan');
-    await loadChats(); updateHeaderSub(); showGroupInfo();
-  } catch (e) { toast(e.message); }
-}
-
-async function deleteGroup() {
-  const c = chats.find(x => x.id === active);
-  if (!c || c.type !== 'group') return;
-  if (!confirm('Hapus grup "' + c.title + '" untuk SEMUA anggota?\nSemua pesan ikut hilang dan nggak bisa dibalikin.')) return;
-  try {
-    await api('groups/update', { code: c.code, action: 'delete' });
-    closeModal(); $('#back').click();
-    ver = ''; await loadChats();
-    toast('Grup dihapus');
-  } catch (e) { toast(e.message); }
-}
-
-async function leaveGroup() {
-  const c = chats.find(x => x.id === active);
-  if (!c || c.type !== 'group') return;
-  if (!confirm('Keluar dari grup "' + c.title + '"?')) return;
-  try {
-    await api('groups/leave', { code: c.code });
-    closeModal(); $('#back').click();
-    ver = ''; await loadChats();
-    toast('Kamu keluar dari grup');
-  } catch (e) { toast(e.message); }
-}
-
-$('#back').onclick = () => { active = null; $('#chat').classList.add('hidden'); renderList(); };
-
-/* DINAMIS MENU TITIK TIGA (DM vs GRUP) */
-$('#cMenuBtn').onclick = () => {
-  if (!active) return;
-  const c = chats.find(x => x.id === active);
-  if (!c) return;
-
-  const isDm = c.type === 'dm';
-  const isPinned = pinnedChats.includes(active);
-  const isMuted = mutedChats.includes(active);
-
-  let menuHtml = `
-    <button class="action-item" onclick="toggleInChatSearch()"><span>🔍</span> Cari pesan</button>
-    <button class="action-item" onclick="togglePinChat()"><span>📌</span> ${isPinned ? 'Lepas sematan chat' : 'Sematkan chat'}</button>
-    <button class="action-item" onclick="toggleArchiveChat()"><span>📦</span> Arsipkan chat</button>
-    <button class="action-item" onclick="toggleMuteChat()"><span>🔕</span> ${isMuted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'}</button>
-    <button class="action-item" onclick="closeActionSheetForce(); ttlModal()"><span>⏳</span> Timer hapus otomatis${c.ttl ? ' (' + TTL_LABEL[c.ttl] + ')' : ''}</button>
-  `;
-
-  // Menu Info Grup HANYA MUNCUL kalau itu grup, bukan DM/Bot
-  if (!isDm) {
-    menuHtml += `<button class="action-item" onclick="closeActionSheetForce(); showGroupInfo()"><span>👥</span> Info / Total Member</button>`;
-  }
-
-  menuHtml += `<button class="action-item" style="color:#ff6b6b" onclick="closeActionSheetForce()"><span>✕</span> Batal</button>`;
-
-  $('#actionSheetBox').innerHTML = menuHtml;
-  $('#actionSheetModal').classList.remove('hidden');
-};
-
-function closeActionSheet(e) { if (e.target.id === 'actionSheetModal') $('#actionSheetModal').classList.add('hidden'); }
-function closeActionSheetForce() { $('#actionSheetModal').classList.add('hidden'); }
-
-function toggleInChatSearch() {
-  closeActionSheetForce();
-  $('#chatSearchBar').classList.toggle('hidden');
-  if (!$('#chatSearchBar').classList.contains('hidden')) $('#inChatSearchInput').focus();
-}
-function closeInChatSearch() { $('#chatSearchBar').classList.add('hidden'); $('#inChatSearchInput').value = ''; renderMsgs(); }
-
-$('#inChatSearchInput').oninput = () => {
-  const query = $('#inChatSearchInput').value.trim().toLowerCase();
-  if (!query) return renderMsgs();
-  const box = $('#msgs');
-  const filtered = msgs.filter(m => m.t && m.t.toLowerCase().includes(query));
-  
-  box.innerHTML = filtered.map(m => `
-    <div class="row ${m.u === myUsername ? 'me' : ''}">
-      <div class="b" style="border:1px solid var(--ac)">
-        <div class="who">${esc(nameOf(m.u))}</div>
-        <div>${fmt(m.t)}</div>
-        <div class="meta">${time(m.ts)}</div>
-      </div>
-    </div>
-  `).join('');
-};
-
-function togglePinChat() {
-  closeActionSheetForce();
-  if (pinnedChats.includes(active)) pinnedChats = pinnedChats.filter(x => x !== active);
-  else pinnedChats.push(active);
-  localStorage.setItem('pinnedChats', JSON.stringify(pinnedChats));
-  renderList();
-  toast('Status sematan diperbarui');
-}
-
-function toggleArchiveChat() {
-  closeActionSheetForce();
-  if (!archivedChats.includes(active)) archivedChats.push(active);
-  localStorage.setItem('archivedChats', JSON.stringify(archivedChats));
-  $('#chat').classList.add('hidden');
-  renderList();
-  toast('Chat diarsipkan');
-}
-
-function toggleMuteChat() {
-  closeActionSheetForce();
-  if (mutedChats.includes(active)) mutedChats = mutedChats.filter(x => x !== active);
-  else mutedChats.push(active);
-  localStorage.setItem('mutedChats', JSON.stringify(mutedChats));
-  toast('Pengaturan notifikasi disimpan');
-}
-
-async function loadMessages() {
-  if (!active) return;
-  const id = active;
-  const j = await api('messages?chat=' + encodeURIComponent(id));
-  if (id !== active) return;
-  await ensureProfiles(j.msgs.flatMap(m => [m.u, m.re && m.re.u]));
-  msgs = j.msgs; start = j.start; curMod = !!j.mod;
-  renderMsgs();
-  seen[id] = Math.max(seen[id] || 0, j.total); saveSeen();
-  renderList();
-}
-
-function previewOf(m) { return m.deleted ? 'Pesan dihapus' : (m.audio ? '🎙️ Pesan suara' : (m.stk ? '🏷️ Stiker' : (m.t || ''))); }
-
-function renderMsgs() {
-  const box = $('#msgs');
-  const c = chats.find(x => x.id === active);
-  const grp = c && c.type !== 'dm';
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
-  let pingTag = null;
-  box.innerHTML = msgs.map((m, k) => {
-    const mine = m.u === myUsername, idx = m.i ?? (start + k);
-    const key = active + ':' + idx;
-    const fresh = !firstRender && !rendered.has(key);
-    rendered.add(key);
-    if (fresh && m.mn && m.mn.includes(myUsername) && m.u !== myUsername) pingTag = nameOf(m.u);
-    const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
-
-    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk" onclick="stkTap(${idx})"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker" onclick="stkTap(${idx})">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
-    const canDelete = mine || curMod;
-    const quote = m.re && !m.deleted ? `<div class="qt" onclick="jumpTo(${m.re.i})"><b>${esc(nameOf(m.re.u))}</b><span>${esc(m.re.t)}</span></div>` : '';
-
-    return `<div class="row ${mine ? 'me' : ''} ${fresh ? 'new' : ''}" data-i="${idx}"><div class="b" ondblclick="react(${idx},'❤️')">
-      ${grp && !mine ? `<div class="who">${esc(nameOf(m.u))}${badge(m.u)}</div>` : ''}
-      ${quote}
-      ${contentHtml}
-      <div class="meta">${m.edited && !m.deleted ? '<span class="edited-tag">diedit</span>' : ''}${time(m.ts)}
-        ${!m.deleted ? `<button class="rb" title="Balas" onclick="startReply(${idx})">↩</button>` : ''}
-        ${!m.deleted && mine && !m.audio && !m.stk ? `<button class="rb" title="Edit pesan" onclick="startEdit(${idx})">✏️</button>` : ''}
-        ${!m.deleted && canDelete ? `<button class="del-btn" title="Hapus pesan" onclick="deleteMessage(${idx})">🗑️</button>` : ''}
-        ${!m.deleted ? `<button class="rb" onclick="pick(event,${idx})">☺</button>` : ''}
-      </div></div>
-      ${rx && !m.deleted ? `<div class="rx">${rx}</div>` : ''}</div>`;
-  }).join('');
-  if (pingTag) { beep(); if (navigator.vibrate) navigator.vibrate(180); toast('📣 ' + pingTag + ' menandai kamu'); }
-  if (firstRender) box.scrollTop = box.scrollHeight;
-  else if (stick || nearBottom) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
-  firstRender = false; stick = false;
-}
-
-function ttlModal() {
-  const c = chats.find(x => x.id === active);
-  if (!c) return;
-  const cur = c.ttlSet === undefined ? null : c.ttlSet;
-  const opts = [[null, 'Ikuti pengaturan default'], ...Object.entries(TTL_LABEL).map(([v, l]) => [+v, l])];
-  modal(`<h3>⏳ Timer hapus otomatis <button class="ico" onclick="closeModal()">✕</button></h3>
-    <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Pesan yang lebih lama dari waktu ini otomatis hilang dari tampilan akunmu. Pesan di akun orang lain tidak ikut terhapus.</p>
-    <div style="display:flex;flex-direction:column;gap:6px">${opts.map(([v, l]) =>
-      `<button class="btn ${cur === v ? '' : 'g'}" onclick="setChatTtl(${v === null ? 'null' : v})">${cur === v ? '● ' : '○ '}${l}</button>`).join('')}</div>`);
-}
-
-async function setChatTtl(v) {
-  try {
-    await api('settings/ttl', { chat: active, ttl: v });
-    closeModal();
-    await loadChats(); await loadMessages();
-    toast('Timer diperbarui');
-  } catch (e) { toast(e.message); }
-}
-
-async function setDefaultTtl(v) {
-  try {
-    await api('settings/ttl', { chat: 'default', ttl: +v });
-    toast('Timer default diperbarui');
-    await loadChats(); if (active) await loadMessages();
-  } catch (e) { toast(e.message); }
-}
-
-function jumpTo(i) {
-  const el = document.querySelector('#msgs .row[data-i="' + i + '"]');
-  if (!el) return toast('Pesan aslinya udah nggak ada di layar');
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  el.classList.add('hl');
-  setTimeout(() => el.classList.remove('hl'), 1400);
-}
-
-/* ----- balas & edit ----- */
-function showCtx(t, x) { $('#ctxT').textContent = t; $('#ctxX').textContent = x; $('#ctxBar').classList.remove('hidden'); }
-function clearCtx() { replyTo = null; editingIdx = null; $('#ctxBar').classList.add('hidden'); }
-function cancelCtx() { if (editingIdx !== null) $('#inp').value = ''; clearCtx(); }
-
-function startReply(idx) {
-  const m = msgs.find(x => x.i === idx);
-  if (!m || m.deleted) return;
-  if (editingIdx !== null) $('#inp').value = '';
-  editingIdx = null;
-  replyTo = { i: m.i, u: m.u, t: previewOf(m).slice(0, 80) };
-  showCtx('Membalas ' + nameOf(m.u), replyTo.t);
-  $('#inp').focus();
-}
-
-function startEdit(idx) {
-  const m = msgs.find(x => x.i === idx);
-  if (!m || m.deleted || m.audio || m.stk || m.u !== myUsername) return;
-  replyTo = null;
-  editingIdx = m.i;
-  showCtx('Mengedit pesan', m.t.slice(0, 80));
-  $('#inp').value = m.t;
-  $('#inp').focus();
-}
-
-/* geser pesan ke kanan = balas (kayak WhatsApp) */
-(function () {
-  const box = $('#msgs');
-  let sx = 0, sy = 0, row = null, dx = 0, lock = null;
-  box.addEventListener('touchstart', e => {
-    const r = e.target.closest('.row[data-i]');
-    if (!r || e.target.closest('audio,button,a,.qt,.rx')) return;
-    row = r; sx = e.touches[0].clientX; sy = e.touches[0].clientY; dx = 0; lock = null;
-  }, { passive: true });
-  box.addEventListener('touchmove', e => {
-    if (!row) return;
-    const x = e.touches[0].clientX - sx, y = e.touches[0].clientY - sy;
-    if (lock === null && (Math.abs(x) > 8 || Math.abs(y) > 8)) lock = (x > 0 && Math.abs(x) > Math.abs(y) * 1.4) ? 'x' : 'y';
-    if (lock !== 'x') return;
-    dx = Math.min(x, 70);
-    const b = row.querySelector('.b');
-    b.style.animation = 'none'; b.style.transition = 'none'; b.style.transform = 'translateX(' + dx + 'px)';
-  }, { passive: true });
-  const end = () => {
-    if (!row) return;
-    const b = row.querySelector('.b');
-    b.style.transition = 'transform .24s cubic-bezier(.22,.9,.3,1)'; b.style.transform = '';
-    if (lock === 'x' && dx > 55) startReply(+row.dataset.i);
-    row = null; lock = null; dx = 0;
-  };
-  box.addEventListener('touchend', end);
-  box.addEventListener('touchcancel', end);
+    await redis.srem('users', LEGACY_BOT);
+    await redis.del('user:' + LEGACY_BOT, 'online:' + LEGACY_BOT, 'av:' + LEGACY_BOT);
+  } catch (e) { console.error('purge bot gagal', e.message); }
 })();
 
-async function deleteMessage(idx) {
-  if(!confirm('Hapus pesan ini?')) return;
-  try {
-    await api('delete-message', { chat: active, idx });
-    await loadMessages();
-    toast('Pesan dihapus');
-  } catch(e) { toast(e.message); }
-}
+// ---------- Auth / Profile ----------
+app.post('/api/register', h(async (req, res) => {
+  const username = clean(req.body.username);
+  const name = String(req.body.name || '').trim().slice(0, 30);
+  if (username.length < 3) return res.status(400).json({ error: 'Username minimal 3 karakter' });
 
-async function react(idx, emoji) { try { await api('react', { chat: active, idx, emoji }); await loadMessages(); } catch (e) { toast(e.message); } }
-function closePk() { document.querySelectorAll('.pk').forEach(x => x.remove()); }
-function pick(e, idx) {
-  e.stopPropagation(); closePk();
-  const d = document.createElement('div'); d.className = 'pk';
-  d.innerHTML = ['❤️', '😂', '👍', '😮', '🔥'].map(x => `<span>${x}</span>`).join('');
-  d.onclick = ev => { if (ev.target.tagName === 'SPAN') react(idx, ev.target.textContent); };
-  document.body.appendChild(d);
-  const r = e.target.getBoundingClientRect();
-  d.style.top = Math.max(8, r.top - 46) + 'px';
-  d.style.left = Math.min(innerWidth - 200, Math.max(8, r.left - 80)) + 'px';
-}
-document.addEventListener('click', closePk);
-
-async function send() {
-  const t = $('#inp').value.trim(); if (!t || !active) return;
-  const chat = active;
-
-  if (editingIdx !== null) {
-    const idx = editingIdx;
-    clearCtx(); $('#inp').value = '';
-    try { await api('edit-message', { chat, idx, text: t }); await loadMessages(); toast('Pesan diedit'); }
-    catch (e) { toast(e.message); }
-    return;
-  }
-
-  const rp = replyTo;
-  clearCtx(); $('#inp').value = ''; stick = true;
-  try { await api('send', { chat, text: t, reply: rp ? rp.i : undefined }); ver = ''; await loadMessages(); loadChats(); }
-  catch (e) { toast(e.message); $('#inp').value = t; }
-}
-$('#send').onclick = send;
-$('#inp').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send(); } };
-async function mentionList(chat) {
-  if (!mentionCache[chat]) {
-    const r = await api('group-members?chat=' + encodeURIComponent(chat));
-    mentionCache[chat] = r.members.filter(m => m.username !== myUsername);
-  }
-  return mentionCache[chat];
-}
-function hideMention() { const b = $('#mentionBox'); if (b) b.classList.add('hidden'); }
-async function showMention(q) {
-  const list = (await mentionList(active)).filter(m => !q || m.username.startsWith(q) || m.name.toLowerCase().includes(q)).slice(0, 8);
-  if (!list.length) return hideMention();
-  let b = $('#mentionBox');
-  if (!b) { b = document.createElement('div'); b.id = 'mentionBox'; b.className = 'mention-box'; $('#chat').appendChild(b); }
-  b.innerHTML = list.map(m => `<button onclick="pickMention('${m.username}')">${avUser(m.username, 's')}<span><b>${esc(m.name)}</b> <small>@${m.username}</small></span></button>`).join('');
-  b.classList.remove('hidden');
-}
-function pickMention(u) {
-  $('#inp').value = $('#inp').value.replace(/(^|\s)@[a-z0-9_.]{0,20}$/i, (x, p) => p + '@' + u + ' ');
-  hideMention(); $('#inp').focus();
-}
-$('#inp').addEventListener('input', () => {
-  const m = /(^|\s)@([a-z0-9_.]{0,20})$/i.exec($('#inp').value);
-  if (!m || !active || active.startsWith('dm:')) return hideMention();
-  showMention(m[2].toLowerCase()).catch(() => {});
-});
-$('#inp').addEventListener('input', () => {
-  if (!active || !$('#inp').value.trim()) return;
-  const n = Date.now();
-  if (n - lastTyping < 2500) return;
-  lastTyping = n;
-  api('typing', { chat: active }).catch(() => {});
-});
-
-// ---------- Stiker ----------
-const STK = { maxVid: 3, recent: [] };
-$('#stkBtn').onclick = openStickerTray;
-
-async function openStickerTray() {
-  if (!active) return toast('Pilih chat dulu');
-  let pack = [];
-  try { pack = await api('stickers'); } catch (e) {}
-  const all = [...pack, ...STK.recent.filter(r => !pack.some(p => p.d === r.d))];
-  modal(`<h3>🏷️ Stiker <button class="ico" onclick="closeModal()">✕</button></h3>
-    <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Foto jadi stiker gambar. Video (maks ${STK.maxVid} detik) jadi stiker yang bergerak dan berulang.</p>
-    <button class="btn" style="width:100%" onclick="pickSticker()">➕ Buat stiker dari foto / video</button>
-    <div class="stk-grid" id="stkGrid"></div>
-    ${all.length ? '' : '<div style="color:var(--mu);font-size:13px;padding:14px 0 0;text-align:center">Belum ada stiker. Buat sendiri, atau ketuk stiker di chat lalu simpan.</div>'}`);
-  const grid = $('#stkGrid');
-  all.forEach(x => {
-    const w = document.createElement('div');
-    w.className = 'stk-wrap';
-    const b = document.createElement('button');
-    b.className = 'stk-cell';
-    b.innerHTML = x.k === 'vid' ? `<video src="${x.d}" autoplay loop muted playsinline></video>` : `<img src="${x.d}" alt="">`;
-    b.onclick = () => sendSticker(x);
-    w.appendChild(b);
-    if (x.id) {
-      const d = document.createElement('button');
-      d.className = 'stk-del';
-      d.textContent = '✕';
-      d.onclick = () => removeSticker(x.id);
-      w.appendChild(d);
+  const existingUser = await redis.get('user:' + username);
+  if (existingUser) {
+    // pemulihan owner: kode rahasia (APP_SECRET) dari layar login -> kunci akun ke HP/IP ini
+    const secret = process.env.APP_SECRET;
+    const raw = String(req.body.recoverKey || '').trim();
+    const ownKey = !!existingUser.rc && raw.toUpperCase() === existingUser.rc;   // kode pribadi, nggak case-sensitive
+    const ownerKey = !!secret && raw === secret && (username === 'aldev' || !existingUser.rc); // kode owner, persis
+    if (raw && (ownKey || ownerKey)) {
+      const b = await forceBind(username, req);
+      res.set('x-device', b.dev);
+      return res.json({ username: existingUser.username, recovered: true });
     }
-    grid.appendChild(w);
-  });
-}
-
-function stkTap(idx) {
-  const m = msgs.find(x => x.i === idx);
-  if (!m || !m.stk) return;
-  const prev = m.stk.k === 'vid'
-    ? `<video src="${m.stk.d}" autoplay loop muted playsinline style="width:160px;height:160px;object-fit:contain"></video>`
-    : `<img src="${m.stk.d}" style="width:160px;height:160px;object-fit:contain">`;
-  modal(`<h3>🏷️ Stiker <button class="ico" onclick="closeModal()">✕</button></h3>
-    <div style="display:flex;justify-content:center;margin:10px 0">${prev}</div>
-    <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="saveSticker(${idx})">💾 Simpan stiker</button></div>`);
-}
-
-async function saveSticker(idx) {
-  const m = msgs.find(x => x.i === idx);
-  if (!m || !m.stk) return;
-  try {
-    await api('stickers/save', { k: m.stk.k, d: m.stk.d });
-    closeModal();
-    toast('Stiker disimpan ke koleksimu');
-  } catch (e) { toast(e.message); }
-}
-
-function pickSticker() {
-  document.querySelectorAll('input[data-stk]').forEach(x => x.remove());
-  const f = document.createElement('input');
-  f.type = 'file'; f.accept = 'image/*,video/*';
-  f.setAttribute('data-stk', '1');
-  f.style.display = 'none';
-  document.body.appendChild(f);
-  f.onchange = async () => {
-    const file = f.files && f.files[0];
-    f.remove();
-    if (!file) return;
-    closeModal(); toast('Lagi bikin stiker...');
-    try {
-      const x = file.type.startsWith('video') ? await vidSticker(file) : await imgSticker(file);
-      STK.recent = [x, ...STK.recent].slice(0, 12);
-      await sendSticker(x);
-    } catch (e) { toast(e.message || 'Gagal bikin stiker'); }
-  };
-  f.click();
-}
-
-async function sendSticker(x) {
-  if (!active) return;
-  closeModal();
-  const chat = active, rp = replyTo;
-  clearCtx(); stick = true;
-  try {
-    await api('send', { chat, text: '', stk: x, reply: rp ? rp.i : undefined });
-    ver = ''; await loadMessages(); loadChats();
-  } catch (e) { toast(e.message); }
-}
-
-async function imgSticker(file) {
-  const im = new Image();
-  im.src = URL.createObjectURL(file);
-  try { await im.decode(); } catch (e) { throw new Error('Foto nggak bisa dibaca'); }
-  for (const size of [512, 384, 256, 192]) {
-    const sc = Math.min(1, size / Math.max(im.naturalWidth, im.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(im.naturalWidth * sc));
-    c.height = Math.max(1, Math.round(im.naturalHeight * sc));
-    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-    let d = c.toDataURL('image/webp', 0.85);
-    if (!d.startsWith('data:image/webp')) d = c.toDataURL('image/png'); // Safari belum bisa encode webp
-    if (d.length <= 700000) return { k: 'img', d };
+    const r = await checkBind(username, req);
+    if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
+    res.set('x-device', r.dev);
+    return res.json({ username: existingUser.username });
   }
-  throw new Error('Foto terlalu rumit buat jadi stiker');
-}
 
-async function vidSticker(file) {
-  if (!window.MediaRecorder) throw new Error('Browser ini belum bisa bikin stiker video');
-  const mime = ['video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(m => MediaRecorder.isTypeSupported(m));
-  if (!mime) throw new Error('Browser ini belum bisa bikin stiker video');
+  if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
 
-  const v = document.createElement('video');
-  v.muted = true; v.playsInline = true; v.preload = 'auto';
-  v.src = URL.createObjectURL(file);
-  await new Promise((ok, no) => { v.onloadedmetadata = ok; v.onerror = () => no(new Error('Video nggak bisa dibaca')); });
-  const dur = v.duration;
-  if (!isFinite(dur) || dur <= 0) throw new Error('Video nggak bisa dibaca');
-  if (dur > STK.maxVid + 0.05) throw new Error(`Video stiker maksimal ${STK.maxVid} detik`);
+  const isAldev = username === 'aldev';
+  const userData = { username, name, bio: '', av: 0, verified: isAldev ? true : false, created: Date.now(), rc: newRc() };
 
-  const S = 384, c = document.createElement('canvas');
-  c.width = c.height = S;
-  const ctx = c.getContext('2d');
-  const s = Math.min(v.videoWidth, v.videoHeight);
-  const sx = (v.videoWidth - s) / 2, sy = (v.videoHeight - s) / 2; // crop tengah jadi kotak
+  await redis.set('user:' + username, userData);
+  await redis.sadd('users', username);
+  await redis.sadd('uchats:' + username, 'global');
 
-  // coba beberapa kualitas sampai muat di batas ukuran
-  for (const bps of [600000, 320000, 160000]) {
-    v.currentTime = 0;
-    const stream = c.captureStream(20);
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bps });
-    const chunks = [];
-    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-    const stopped = new Promise(r => (rec.onstop = r));
-    rec.start(200);
-    await v.play();
-    await new Promise(res => {
-      const step = () => {
-        ctx.drawImage(v, sx, sy, s, s, 0, 0, S, S);
-        if (v.ended || v.currentTime >= dur - 0.04) return res();
-        requestAnimationFrame(step);
-      };
-      step();
+  const bound = await forceBind(username, req);
+  res.set('x-device', bound.dev);
+  res.json({ username });
+}));
+
+app.get('/api/me', auth, h(async (req, res) => {
+  let me = await redis.get('user:' + req.u);
+  if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan' });
+  if (!me.rc) { me.rc = newRc(); await redis.set('user:' + req.u, me); }
+  if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
+  
+  await redis.set('online:' + req.u, Date.now(), { ex: 30 });
+  await redis.sadd('days:' + req.u, today());
+
+  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
+}));
+
+app.post('/api/me', auth, h(async (req, res) => {
+  const me = await redis.get('user:' + req.u);
+  if (!me) return res.status(404).json({ error: 'Akun tidak ditemukan' });
+  const name = String(req.body.name ?? me.name).trim().slice(0, 30);
+  if (!name) return res.status(400).json({ error: 'Nama tidak boleh kosong' });
+  me.name = name;
+  me.bio = String(req.body.bio ?? me.bio).slice(0, 120);
+  if (req.u === 'aldev') me.verified = true;
+  const a = req.body.avatar;
+  if (a === '') { await redis.del('av:' + req.u); me.av = 0; }
+  else if (typeof a === 'string') {
+    if (!a.startsWith('http') && (!/^data:image\/(jpeg|png|webp);base64,/.test(a) || a.length > 300000)) return res.status(400).json({ error: 'Foto kegedean' });
+    await redis.set('av:' + req.u, a);
+    me.av = Date.now();
+  }
+  await redis.set('user:' + req.u, me);
+  res.json({ ok: 1 });
+}));
+
+app.post('/api/verify', auth, h(async (req, res) => {
+  const me = await redis.get('user:' + req.u);
+  const ms = await missions(req.u, me);
+  if (!ms.every(m => m.n >= m.max)) return res.status(400).json({ error: 'Misi belum selesai' });
+  me.verified = true;
+  await redis.set('user:' + req.u, me);
+  res.json({ ok: 1 });
+}));
+
+app.get('/api/avatar/:u', h(async (req, res) => {
+  const u = clean(req.params.u);
+  const a = await redis.get('av:' + u);
+  if (typeof a === 'string' && a.startsWith('http')) return res.redirect(a);
+  const m = /^data:(image\/\w+);base64,(.+)$/.exec(a || '');
+  if (!m) return res.status(404).end();
+  res.set('Content-Type', m[1]).set('Cache-Control', 'public,max-age=300').send(Buffer.from(m[2], 'base64'));
+}));
+
+app.post('/api/profiles', auth, h(async (req, res) => {
+  const list = [...new Set((req.body.users || []).map(clean).filter(Boolean))].slice(0, 100);
+  const out = {};
+  const devBadge = getDevBadgeColor();
+  if (list.length) {
+    const rows = await redis.mget(...list.map(u => 'user:' + u));
+    const onlineKeys = await redis.mget(...list.map(u => 'online:' + u));
+    list.forEach((u, i) => { 
+      const r = rows[i]; 
+      if (r) {
+        out[u] = { 
+          name: r.name, 
+          v: !!r.verified || u === 'aldev', 
+          badgeColor: u === 'aldev' ? devBadge : 'blue',
+          a: r.av || 0, 
+          bio: r.bio,
+          online: !!onlineKeys[i]
+        }; 
+      }
     });
-    ctx.drawImage(v, sx, sy, s, s, 0, 0, S, S);
-    await new Promise(r => setTimeout(r, 120));
-    rec.stop(); await stopped;
-    stream.getTracks().forEach(t => t.stop());
-
-    const blob = new Blob(chunks, { type: mime.split(';')[0] });
-    const d = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
-    if (d.length <= 700000) return { k: 'vid', d };
   }
-  throw new Error('Video terlalu rumit buat jadi stiker, coba yang lebih pendek');
-}
+  res.json(out);
+}));
 
-// Voice Note (VN)
-let mediaRec, audioChunks = [], isRecording = false, isCanceled = false;
-$('#vnBtn').onclick = async () => {
-  if (!active) return toast('Pilih chat dulu');
-  if (!isRecording) {
-    audioChunks = []; isCanceled = false;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRec = new MediaRecorder(stream);
-      mediaRec.ondataavailable = e => audioChunks.push(e.data);
-      mediaRec.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        if (isCanceled) return toast('Perekaman VN dibatalkan');
-        const blob = new Blob(audioChunks, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.readAsDataURL(blob);
-        reader.onloadend = async () => {
-          try {
-            const rp = replyTo; clearCtx(); stick = true;
-            await api('send', { chat: active, text: '', audio: reader.result, reply: rp ? rp.i : undefined });
-            ver = ''; await loadMessages(); loadChats();
-            toast('Voice Note terkirim');
-          } catch(err) { toast(err.message); }
-        };
-      };
-      mediaRec.start();
-      isRecording = true;
-      $('#vnBtn').textContent = '⏹️';
-      $('#cancelVnBtn').classList.remove('hidden');
-      toast('Merekam VN...');
-    } catch(e) { toast('Gagal akses mic'); }
-  } else {
-    if (mediaRec && mediaRec.state === 'recording') mediaRec.stop();
-    isRecording = false;
-    $('#vnBtn').textContent = '🎙️';
-    $('#cancelVnBtn').classList.add('hidden');
+app.get('/api/group-members', auth, h(async (req, res) => {
+  const chat = String(req.query.chat || '');
+  let usernames = [];
+  let groupData = null;
+
+  if (chat === 'global') {
+    usernames = (await redis.smembers('users')).filter(x => x !== LEGACY_BOT);
+  } else if (chat.startsWith('grp:')) {
+    groupData = await redis.get('group:' + chat.slice(4));
+    if (groupData) usernames = groupData.members;
+  } else if (chat.startsWith('dm:')) {
+    usernames = chat.slice(3).split(':');
   }
-};
 
-$('#cancelVnBtn').onclick = () => {
-  if (isRecording && mediaRec) {
-    isCanceled = true; mediaRec.stop();
-    isRecording = false;
-    $('#vnBtn').textContent = '🎙️';
-    $('#cancelVnBtn').classList.add('hidden');
-  }
-};
+  const devBadge = getDevBadgeColor();
+  const gAdm = chat === 'global' ? new Set(await redis.smembers('gadmins')) : new Set();
+  const rows = usernames.length ? await redis.mget(...usernames.map(u => 'user:' + u)) : [];
+  const onlineKeys = usernames.length ? await redis.mget(...usernames.map(u => 'online:' + u)) : [];
 
-function modal(html) { $('#box').innerHTML = html; $('#modal').classList.remove('hidden'); }
-function closeModal() { $('#modal').classList.add('hidden'); }
-$('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
+  let onlineCount = 0;
+  const list = usernames.map((u, i) => {
+    const r = rows[i] || { name: u, username: u };
+    const isOnline = !!onlineKeys[i];
+    if (isOnline) onlineCount++;
+    const isOwner = groupData ? groupData.owner === u : u === 'aldev';
+    const isAdmin = groupData ? (groupData.admins || [groupData.owner]).includes(u) : gAdm.has(u);
 
-function copy(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Tersalin'), () => toast('Salin manual')); }
-
-$('#fab').onclick = () => modal(`<h3>Baru</h3><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-  <button class="btn g" onclick="dmModal()">💬 Chat / kontak baru</button>
-  <button class="btn g" onclick="groupModal()">👥 Buat grup</button>
-  <button class="btn g" onclick="joinModal()">🔗 Gabung grup lewat kode</button></div>`);
-
-function dmModal() {
-  modal(`<h3>Chat / Kontak</h3><label>Username</label><input id="mU" placeholder="@username" autocapitalize="none" autocomplete="off">
-  <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="doDm(false)">Chat</button></div>`);
-  $('#mU').focus();
-}
-async function doDm(save) {
-  try {
-    const r = await api('dm', { username: $('#mU').value, save });
-    closeModal();
-    await startDm(null, r.id);
-  } catch (e) { toast(e.message); }
-}
-async function startDm(username, id) {
-  try {
-    if (!id) id = (await api('dm', { username })).id;
-    $('#q').value = ''; people = [];
-    ver = ''; await loadChats(); await openChat(id);
-  } catch (e) { toast(e.message); }
-}
-function groupModal() {
-  modal(`<h3>Buat grup</h3><label>Nama grup</label><input id="mG" maxlength="30" placeholder="Nama grup">
-  <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="doGroup()">Buat</button></div>`);
-  $('#mG').focus();
-}
-async function doGroup() {
-  try { const r = await api('groups', { name: $('#mG').value }); closeModal(); await loadChats(); openChat(r.id); } catch (e) { toast(e.message); }
-}
-function joinModal() {
-  modal(`<h3>Gabung grup</h3><label>Kode grup</label><input id="mC" placeholder="contoh: a1b2c3d4" autocapitalize="none" autocomplete="off">
-  <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="doJoin()">Gabung</button></div>`);
-  $('#mC').focus();
-}
-async function doJoin() {
-  try { const r = await api('groups/join', { code: $('#mC').value }); closeModal(); await loadChats(); openChat(r.id); } catch (e) { toast(e.message); }
-}
-
-let newAv;
-$('#gear').onclick = async () => {
-  newAv = undefined;
-  me = await api('me');
-  const tt = await api('settings/ttl?chat=default').catch(() => ({ def: 0 }));
-  const done = me.missions.every(m => m.n >= m.max);
-  const notifOn = 'Notification' in window && Notification.permission === 'granted';
-  modal(`<h3>Pengaturan <button class="ico" onclick="closeModal()">✕</button></h3>
-  <div style="display:flex;gap:12px;align-items:center"><div id="avPrev">${avUser(me.username)}</div>
-    <button class="btn g" onclick="$('#file').click()">Ganti foto</button><button class="btn g" onclick="rmAv()">Hapus</button>
-    <input type="file" id="file" accept="image/*" class="hidden"></div>
-  <label>Nama</label><input id="sName" maxlength="30" value="${esc(me.name)}">
-  <label>Username</label><input value="@${me.username}" disabled>
-  <label>Bio</label><textarea id="sBio" rows="2" maxlength="120">${esc(me.bio || '')}</textarea>
-  <label>⏳ Hapus pesan otomatis (semua chat)</label>
-  <select id="sTtl" onchange="setDefaultTtl(this.value)">${Object.entries(TTL_LABEL).map(([v, l]) => `<option value="${v}" ${+v === tt.def ? 'selected' : ''}>${l}${+v === 0 ? ' (bawaan)' : ''}</option>`).join('')}</select>
-  <div style="font-size:11px;color:var(--mu);margin-top:4px">Pesan lama hilang dari tampilan akunmu. Bisa diatur beda per chat lewat menu ⋮ di dalam chat.</div>
-  <label>Notifikasi</label>
-  <button class="btn g" id="nBtn" ${notifOn ? 'disabled' : ''} onclick="askNotif()">${notifOn ? 'Notifikasi aktif' : 'Aktifkan notifikasi'}</button>
-  <label>Kode pemulihan</label>
-  <div class="code"><span>${me.rc || '-'}</span><button class="btn" onclick="copy('${me.rc || ''}')">Salin</button></div>
-  <div style="font-size:11px;color:var(--mu);margin-top:4px">Pakai kode ini kalau akunmu ketahan di HP/IP baru. Simpan dan jangan dibagiin.</div>
-  <label>Centang biru ${badge(me.username)}</label>
-  ${me.verified || me.username === 'aldev' ? '<div class="ms">Akun kamu sudah terverifikasi.</div>' : me.missions.map(m => `<div class="ms"><div class="r"><span>${m.t}</span><span>${m.n}/${m.max}</span></div><div class="bar"><i style="width:${m.n / m.max * 100}%"></i></div></div>`).join('') +
-    `<button class="btn" style="margin-top:6px" ${done ? '' : 'disabled'} onclick="claim()">${done ? 'Klaim centang biru' : 'Selesaikan misi dulu'}</button>`}
-  <div class="acts"><button class="btn g" onclick="logout()">Keluar</button><button class="btn" onclick="saveMe()">Simpan</button></div>`);
-  $('#file').onchange = async e => {
-    const f = e.target.files[0]; if (!f) return;
-    newAv = await resize(f);
-    $('#avPrev').innerHTML = `<img class="av" src="${newAv}">`;
-  };
-};
-
-function resize(file) {
-  return new Promise(ok => {
-    const im = new Image();
-    im.onload = () => {
-      const s = 160, c = document.createElement('canvas'); c.width = c.height = s;
-      const m = Math.min(im.width, im.height);
-      c.getContext('2d').drawImage(im, (im.width - m) / 2, (im.height - m) / 2, m, m, 0, 0, s, s);
-      ok(c.toDataURL('image/jpeg', .8));
+    return {
+      username: u,
+      name: r.name || u,
+      v: !!r.verified || u === 'aldev',
+      badgeColor: u === 'aldev' ? devBadge : 'blue',
+      a: r.av || 0,
+      online: isOnline,
+      role: isOwner ? 'owner' : isAdmin ? 'admin' : 'member'
     };
-    im.src = URL.createObjectURL(file);
   });
-}
-function rmAv() { newAv = ''; $('#avPrev').innerHTML = avText($('#sName').value, me.username); }
 
-async function saveMe() {
-  try {
-    const b = { name: $('#sName').value, bio: $('#sBio').value };
-    if (newAv !== undefined) b.avatar = newAv;
-    await api('me', b);
-    me = await api('me'); prof[me.username] = { name: me.name, v: me.verified, badgeColor: me.devBadgeColor || 'blue', a: me.av };
-    drawMe(); closeModal(); toast('Tersimpan'); renderList();
-  } catch (e) { toast(e.message); }
+  res.json({ total: usernames.length, onlineCount, members: list });
+}));
+
+app.get('/api/users', auth, h(async (req, res) => {
+  const q = String(req.query.q || '').toLowerCase().replace(/^@/, '').trim();
+  if (q.length < 2) return res.json([]);
+  const all = await redis.smembers('users');
+  const rows = await redis.mget(...all.map(u => 'user:' + u));
+  const devBadge = getDevBadgeColor();
+  const found = rows.filter(r => r && (r.username.includes(q) || r.name.toLowerCase().includes(q)))
+    .map(r => ({ 
+      username: r.username, 
+      name: r.name, 
+      v: !!r.verified || r.username === 'aldev', 
+      badgeColor: r.username === 'aldev' ? devBadge : 'blue',
+      a: r.av || 0
+    }));
+  res.json(found.filter(x => x.username !== req.u).slice(0, 20));
+}));
+
+const canTypeIn = (u, chat) =>
+  chat === 'global' || chat.startsWith('grp:') || (chat.startsWith('dm:') && chat.slice(3).split(':').includes(u));
+
+app.get('/api/sync', auth, h(async (req, res) => {
+  const chat = String(req.query.chat || '');
+  const [vers, typing] = await Promise.all([
+    redis.mget('ver:' + req.u, 'ver:global'),
+    chat && canTypeIn(req.u, chat) ? redis.zrange('typing:' + chat, Date.now() - 5000, '+inf', { byScore: true }) : Promise.resolve([]),
+    req.query.hb ? redis.set('online:' + req.u, Date.now(), { ex: 30 }) : Promise.resolve(),
+  ]);
+  res.json({
+    v: (vers[0] || 0) + '.' + (vers[1] || 0),
+    chat,
+    typing: (typing || []).map(String).filter(x => x !== req.u),
+  });
+}));
+
+app.post('/api/typing', auth, h(async (req, res) => {
+  const chat = String(req.body.chat || '');
+  if (!chat || !canTypeIn(req.u, chat)) return res.json({ ok: 0 });
+  const p = redis.pipeline();
+  p.zadd('typing:' + chat, { score: Date.now(), member: req.u });
+  p.expire('typing:' + chat, 20);
+  await p.exec();
+  res.json({ ok: 1 });
+}));
+
+app.get('/api/chats', auth, h(async (req, res) => {
+  const u = req.u;
+  const rawIds = await redis.smembers('uchats:' + u);
+  // buang chat pribadi dengan bot lama
+  const deadDm = rawIds.filter(i => i.startsWith('dm:') && i.slice(3).split(':').includes(LEGACY_BOT));
+  if (deadDm.length) await Promise.all([redis.srem('uchats:' + u, ...deadDm), redis.del(...deadDm.map(i => 'c:' + i))]);
+  const uniqueIds = [...new Set(['global', ...rawIds.filter(i => !deadDm.includes(i))])];
+  const gids = uniqueIds.filter(i => i.startsWith('grp:'));
+  const groups = gids.length ? await redis.mget(...gids.map(g => 'group:' + g.slice(4))) : [];
+  // buang sisa bot lama dari anggota grup
+  await Promise.all(groups.filter(g => g && g.members.includes(LEGACY_BOT)).map(g => {
+    g.members = g.members.filter(x => x !== LEGACY_BOT);
+    g.admins = (g.admins || []).filter(x => x !== LEGACY_BOT);
+    return redis.set('group:' + g.id, g);
+  }));
+  const gm = {};
+  gids.forEach((g, i) => (gm[g] = groups[i]));
+  const p = redis.pipeline();
+  uniqueIds.forEach(i => { p.llen('c:' + i); p.lindex('c:' + i, -1); });
+  const r = await p.exec();
+  const out = uniqueIds.map((id, i) => {
+    const count = r[i * 2], last = r[i * 2 + 1];
+    if (id === 'global') return { id, type: 'global', title: SYSTEM_CONFIG.mainGroupName, avatar: SYSTEM_CONFIG.mainGroupAvatar, count, last, verified: true };
+    if (id.startsWith('dm:')) {
+      const other = id.slice(3).split(':').find(x => x !== u);
+      return { id, type: 'dm', title: other, other, count, last };
+    }
+    const g = gm[id];
+    if (!g) return null;
+    return { id, type: 'group', title: g.name, avatar: g.avatar || null, code: g.id, members: g.members.length, count, last };
+  }).filter(Boolean);
+  // preview terakhir jangan pesan bot lama
+  await Promise.all(out.map(async c => {
+    if (c.last && c.last.u === LEGACY_BOT) {
+      const tail = await redis.lrange('c:' + c.id, -20, -1);
+      c.last = [...tail].reverse().find(m => m && m.u !== LEGACY_BOT) || null;
+    }
+  }));
+  // timer hapus otomatis per chat (kalau belum diatur, ikut default)
+  const ttlVals = await redis.mget(...uniqueIds.map(i => ttlKey(u, i)), ttlKey(u, 'default'));
+  const defTtl = parseInt(ttlVals[ttlVals.length - 1] || 0, 10) || 0;
+  const setBy = {};
+  uniqueIds.forEach((id, i) => (setBy[id] = ttlVals[i]));
+  const now = Date.now();
+  out.forEach(c => {
+    const spec = setBy[c.id];
+    c.ttlSet = spec == null ? null : (parseInt(spec, 10) || 0);
+    c.ttl = c.ttlSet === null ? defTtl : c.ttlSet;
+    if (c.ttl > 0 && c.last && now - c.last.ts >= c.ttl * 1000) c.last = null;
+  });
+  res.json(out);
+}));
+
+app.get('/api/messages', auth, h(async (req, res) => {
+  const chat = String(req.query.chat || '');
+  const accM = await access(req.u, chat);
+  if (!accM.ok) return res.status(403).json({ error: 'Akses ditolak' });
+
+  const [ttlVals, total] = await Promise.all([
+    redis.mget(ttlKey(req.u, chat), ttlKey(req.u, 'default')),
+    redis.llen('c:' + chat),
+  ]);
+  const ttl = parseInt(ttlVals[0] ?? ttlVals[1] ?? 0, 10) || 0;
+  const now = Date.now();
+  const start = Math.max(0, total - 200);
+  const raw = total ? await redis.lrange('c:' + chat, start, -1) : [];
+  const msgs = [];
+  raw.forEach((m, k) => {
+    if (!m || m.u === LEGACY_BOT) return;
+    if (ttl > 0 && (now - m.ts) >= ttl * 1000) return;
+    msgs.push({ ...m, i: start + k });
+  });
+  res.json({ start, total, msgs, mod: await canModerate(req.u, chat, accM) });
+}));
+
+// ---------- Kirim Pesan ----------
+app.post('/api/send', auth, h(async (req, res) => {
+  const chat = String(req.body.chat || '');
+  const text = String(req.body.text || '').trim().slice(0, 2000);
+  const audio = req.body.audio || null;
+  // stiker: gambar (webp/png) atau video pendek (webm/mp4), dibatasi ukurannya
+  let stkObj = null;
+  if (req.body.stk && typeof req.body.stk === 'object') {
+    const d = String(req.body.stk.d || '');
+    const ok = d.length <= 700000 && (
+      (req.body.stk.k === 'img' && /^data:image\/(webp|png);base64,/.test(d)) ||
+      (req.body.stk.k === 'vid' && /^data:video\/(webm|mp4)[;,]/.test(d)));
+    if (!ok) return res.status(400).json({ error: 'Stiker tidak valid atau kegedean' });
+    stkObj = { k: req.body.stk.k, d };
+  }
+  if (!text && !audio && !stkObj) return res.status(400).json({ error: 'Pesan kosong' });
+
+  const acc = await access(req.u, chat);
+  if (!acc.ok) return res.status(403).json({ error: 'Tidak boleh kirim pesan' });
+
+  const msgObj = { u: req.u, t: text, audio: audio, ts: Date.now(), r: {} };
+  if (stkObj) msgObj.stk = stkObj;
+
+  // tag @username: cuma yang benar-benar ada di chat ini
+  const cand = [...new Set([...text.matchAll(/(^|\s)@([a-z0-9_.]{3,20})/gi)].map(x => x[2].toLowerCase()))].filter(x => x !== req.u);
+  if (cand.length) {
+    let mn;
+    if (acc.members) mn = cand.filter(x => acc.members.includes(x));
+    else { const rows = await redis.mget(...cand.map(x => 'user:' + x)); mn = cand.filter((x, i) => rows[i]); }
+    if (mn.length) msgObj.mn = mn.slice(0, 10);
+  }
+
+  // balas pesan: isi kutipan diambil dari database biar nggak bisa dipalsuin
+  if (req.body.reply != null) {
+    const ri = parseInt(req.body.reply, 10);
+    if (ri >= 0) {
+      const o = await redis.lindex('c:' + chat, ri);
+      if (o && !o.deleted) msgObj.re = { u: o.u, i: ri, t: String(o.audio ? '🎙️ Pesan suara' : o.stk ? '🏷️ Stiker' : o.t || '').slice(0, 80) };
+    }
+  }
+
+  await redis.rpush('c:' + chat, msgObj);
+  await Promise.all([
+    redis.incr('msgs:' + req.u),
+    bump(chat, acc.members || []),
+    redis.zrem('typing:' + chat, req.u),
+    redis.sadd('allchats', chat),
+    ...(chat.startsWith('dm:') ? acc.members.map(m => redis.sadd('uchats:' + m, chat)) : []),
+  ]);
+  res.json({ ok: 1 });
+}));
+
+// Moderator: owner & admin grup (atau owner/admin Global). DM nggak punya moderator.
+async function canModerate(u, chat, acc) {
+  if (chat.startsWith('grp:')) { const g = acc.group; return !!g && (g.owner === u || (g.admins || []).includes(u)); }
+  if (chat === 'global') return u === 'aldev' || (await redis.smembers('gadmins')).includes(u);
+  return false;
 }
 
-async function claim() {
-  try { await api('verify', {}); me = await api('me'); prof[me.username].v = true; drawMe(); closeModal(); toast('Centang biru aktif!'); }
-  catch (e) { toast(e.message); }
-}
+app.post('/api/delete-message', auth, h(async (req, res) => {
+  const { chat, idx } = req.body;
+  const u = req.u;
+  const acc = await access(u, chat);
+  if (!acc.ok || !(idx >= 0)) return res.status(400).json({ error: 'Gagal menghapus' });
 
-async function askNotif() {
-  if (!('Notification' in window)) return toast('Browser tidak support notifikasi');
-  const p = await Notification.requestPermission();
-  toast(p === 'granted' ? 'Notifikasi aktif' : 'Notifikasi ditolak'); $('#nBtn').disabled = p === 'granted';
-}
+  const m = await redis.lindex('c:' + chat, idx);
+  if (!m) return res.status(404).json({ error: 'Pesan tidak ditemukan' });
+  
+  if (m.u !== u && !(await canModerate(u, chat, acc))) {
+    return res.status(403).json({ error: 'Kamu cuma bisa menghapus pesan sendiri (owner/admin bisa hapus pesan anggota)' });
+  }
 
-if (myUsername) boot().catch(() => {});
-else {
-  $('#auth').classList.remove('hidden');
-  const pend = sessionStorage.getItem('authErr');
-  if (pend) { $('#aErr').textContent = pend; sessionStorage.removeItem('authErr'); }
+  m.t = '🚮 Pesan ini telah dihapus';
+  delete m.audio;
+  m.deleted = true;
+  
+  await redis.lset('c:' + chat, idx, m);
+  await bump(chat, acc.members || []);
+  res.json({ ok: 1 });
+}));
+
+app.post('/api/edit-message', auth, h(async (req, res) => {
+  const { chat } = req.body;
+  const idx = parseInt(req.body.idx, 10);
+  const text = String(req.body.text || '').trim().slice(0, 2000);
+  const acc = await access(req.u, chat);
+  if (!acc.ok || !(idx >= 0) || !text) return res.status(400).json({ error: 'Gagal mengedit' });
+  const m = await redis.lindex('c:' + chat, idx);
+  if (!m || m.deleted) return res.status(404).json({ error: 'Pesan tidak ditemukan' });
+  if (m.u !== req.u) return res.status(403).json({ error: 'Kamu hanya bisa mengedit pesan milikmu sendiri' });
+  if (m.audio || m.stk) return res.status(400).json({ error: 'Voice note dan stiker tidak bisa diedit' });
+  m.t = text;
+  m.edited = true;
+  await redis.lset('c:' + chat, idx, m);
+  await bump(chat, acc.members || []);
+  res.json({ ok: 1 });
+}));
+
+app.post('/api/react', auth, h(async (req, res) => {
+  const { chat, emoji } = req.body;
+  const idx = parseInt(req.body.idx, 10);
+  const u = req.u;
+  const acc = await access(u, chat);
+  if (!acc.ok || !EMOJI.includes(emoji) || !(idx >= 0)) return res.status(400).json({ error: 'Gagal' });
+  const m = await redis.lindex('c:' + chat, idx);
+  if (!m || m.deleted) return res.status(404).json({ error: 'Pesan tidak ada atau terhapus' });
+  m.r = m.r || {};
+  const arr = m.r[emoji] || [];
+  const i = arr.indexOf(u);
+  if (i >= 0) arr.splice(i, 1);
+  else { arr.push(u); await redis.incr('reacts:' + u); }
+  if (arr.length) m.r[emoji] = arr; else delete m.r[emoji];
+  await redis.lset('c:' + chat, idx, m);
+  await bump(chat, acc.members || []);
+  res.json({ ok: 1 });
+}));
+
+app.post('/api/settings/ttl', auth, h(async (req, res) => {
+  const chat = String(req.body.chat || '');
+  if (chat !== 'default' && !(await access(req.u, chat)).ok) return res.status(403).json({ error: 'Akses ditolak' });
+  // ttl: null / 'default' = ikut pengaturan default (cuma buat chat tertentu)
+  if (req.body.ttl === null || req.body.ttl === 'default') {
+    if (chat === 'default') return res.status(400).json({ error: 'Pilihan tidak valid' });
+    await redis.del(ttlKey(req.u, chat));
+    return res.json({ ok: 1 });
+  }
+  const ttl = parseInt(req.body.ttl, 10) || 0;
+  if (!TTL_OPTIONS.includes(ttl)) return res.status(400).json({ error: 'Pilihan timer tidak valid' });
+  await redis.set(ttlKey(req.u, chat), ttl);
+  res.json({ ok: 1 });
+}));
+
+app.get('/api/settings/ttl', auth, h(async (req, res) => {
+  const chat = String(req.query.chat || 'default');
+  const [c, d] = await redis.mget(ttlKey(req.u, chat), ttlKey(req.u, 'default'));
+  const def = parseInt(d || 0, 10) || 0;
+  const chatTtl = chat === 'default' ? def : (c == null ? null : parseInt(c, 10) || 0);
+  res.json({ ttl: chatTtl === null ? def : chatTtl, chatTtl, def });
+}));
+
+// ---------- Management Grup, Admin, & Kick/Add ----------
+app.post('/api/groups', auth, h(async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 30);
+  if (!name) return res.status(400).json({ error: 'Nama grup wajib diisi' });
+  const id = crypto.randomBytes(4).toString('hex');
+  const groupObj = { id, name, avatar: null, owner: req.u, admins: [req.u], members: [req.u] };
+  await redis.set('group:' + id, groupObj);
+  await redis.sadd('uchats:' + req.u, 'grp:' + id);
+  res.json({ id: 'grp:' + id });
+}));
+
+app.post('/api/groups/update', auth, h(async (req, res) => {
+  const { code, name, avatar, action, targetUser } = req.body;
+  if ((code === SYSTEM_CONFIG.mainGroupId || code === 'global') && (action === 'promote' || action === 'demote') && targetUser) {
+    const tu = clean(targetUser);
+    const gAdmin = req.u === 'aldev' || (await redis.smembers('gadmins')).includes(req.u);
+    if (!gAdmin) return res.status(403).json({ error: 'Cuma admin atau owner yang bisa mengatur admin' });
+    if (action === 'promote') {
+      if (!(await redis.exists('user:' + tu))) return res.status(404).json({ error: 'User tidak ditemukan' });
+      await redis.sadd('gadmins', tu);
+    } else {
+      if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner yang bisa menurunkan admin' });
+      if (tu === 'aldev') return res.status(400).json({ error: 'Owner tidak bisa diturunkan' });
+      await redis.srem('gadmins', tu);
+    }
+    await redis.incr('ver:global');
+    return res.json({ ok: 1 });
+  }
+  if (code === SYSTEM_CONFIG.mainGroupId || code === 'global') {
+    return res.status(403).json({ error: 'Grup utama dikunci dan tidak bisa diubah/dihapus!' });
+  }
+  const g = await redis.get('group:' + code);
+  if (!g) return res.status(404).json({ error: 'Grup tidak ditemukan' });
+  
+  const isOwner = g.owner === req.u || req.u === 'aldev';
+  const isAdmin = (g.admins || [g.owner]).includes(req.u) || isOwner;
+
+  if (!isAdmin) return res.status(403).json({ error: 'Hanya Admin atau Owner grup yang memiliki akses!' });
+
+  if (action === 'delete') {
+    if (!isOwner) return res.status(403).json({ error: 'Hanya Owner yang bisa menghapus grup!' });
+    await Promise.all([
+      redis.del('group:' + code),
+      redis.del('c:grp:' + code),
+      redis.del('typing:grp:' + code),
+      ...g.members.map(m => redis.srem('uchats:' + m, 'grp:' + code)),
+    ]);
+    await Promise.all(g.members.map(m => redis.incr('ver:' + m)));
+    return res.json({ ok: 1 });
+  }
+
+  if (action === 'kick' && targetUser) {
+    if (targetUser === g.owner) return res.status(400).json({ error: 'Owner grup tidak dapat dikeluarkkan!' });
+    if (!isAdmin) return res.status(403).json({ error: 'Cuma admin yang bisa mengeluarkan anggota' });
+    if (!isOwner && (g.admins || []).includes(targetUser)) return res.status(403).json({ error: 'Admin hanya bisa dikeluarkan owner' });
+    g.members = g.members.filter(m => m !== targetUser);
+    g.admins = (g.admins || []).filter(a => a !== targetUser);
+    await redis.set('group:' + code, g);
+    await redis.srem('uchats:' + targetUser, 'grp:' + code);
+    await bump('grp:' + code, g.members);
+    return res.json({ ok: 1 });
+  }
+
+  if (action === 'promote' && targetUser) {
+    if (!isAdmin) return res.status(403).json({ error: 'Cuma admin atau owner yang bisa menaikkan admin' });
+    if (!g.members.includes(targetUser)) return res.status(400).json({ error: 'Dia bukan anggota grup' });
+    g.admins = g.admins || [];
+    if (!g.admins.includes(targetUser)) g.admins.push(targetUser);
+    await redis.set('group:' + code, g);
+    await bump('grp:' + code, g.members);
+    return res.json({ ok: 1 });
+  }
+
+  if (action === 'demote' && targetUser) {
+    if (!isOwner) return res.status(403).json({ error: 'Cuma owner yang bisa menurunkan admin' });
+    if (targetUser === g.owner) return res.status(400).json({ error: 'Owner tidak bisa diturunkan' });
+    g.admins = (g.admins || []).filter(a => a !== targetUser);
+    await redis.set('group:' + code, g);
+    await bump('grp:' + code, g.members);
+    return res.json({ ok: 1 });
+  }
+
+  if (name) g.name = String(name).trim().slice(0, 30);
+  if (avatar !== undefined) g.avatar = avatar;
+
+  await redis.set('group:' + code, g);
+  await bump('grp:' + code, g.members);
+  res.json({ ok: 1 });
+}));
+
+app.post('/api/groups/join', auth, h(async (req, res) => {
+  const code = String(req.body.code || '').trim().toLowerCase().replace(/[^a-f0-9]/g, '');
+  const g = code && (await redis.get('group:' + code));
+  if (!g) return res.status(404).json({ error: 'Kode grup tidak ditemukan / tidak valid' });
+  if (!g.members.includes(req.u)) {
+    if (g.members.length >= 200) return res.status(400).json({ error: 'Grup penuh' });
+    g.members.push(req.u);
+    await redis.set('group:' + code, g);
+    await bump('grp:' + code, g.members);
+  }
+  await redis.sadd('uchats:' + req.u, 'grp:' + code);
+  res.json({ id: 'grp:' + code });
+}));
+
+app.post('/api/groups/leave', auth, h(async (req, res) => {
+  const code = String(req.body.code || '').replace(/[^a-f0-9]/g, '');
+  const g = code && (await redis.get('group:' + code));
+  if (!g) return res.status(404).json({ error: 'Grup tidak ditemukan' });
+  if (!g.members.includes(req.u)) return res.status(400).json({ error: 'Kamu bukan anggota grup ini' });
+  g.members = g.members.filter(m => m !== req.u);
+  g.admins = (g.admins || []).filter(a => a !== req.u);
+  await redis.srem('uchats:' + req.u, 'grp:' + code);
+  if (!g.members.length) {
+    await Promise.all([redis.del('group:' + code), redis.del('c:grp:' + code)]);
+  } else {
+    if (g.owner === req.u) {
+      g.owner = g.admins[0] || g.members[0];
+      if (!g.admins.includes(g.owner)) g.admins.push(g.owner);
+    }
+    await redis.set('group:' + code, g);
+    await bump('grp:' + code, g.members);
+  }
+  res.json({ ok: 1 });
+}));
+
+app.post('/api/dm', auth, h(async (req, res) => {
+  const other = clean(req.body.username);
+  if (!other || other === req.u) return res.status(400).json({ error: 'Username tidak valid' });
+  if (!(await redis.exists('user:' + other))) return res.status(404).json({ error: 'Username tidak ditemukan' });
+  const id = dmId(req.u, other);
+  await redis.sadd('contacts:' + req.u, other);
+  if (!req.body.save) await redis.sadd('uchats:' + req.u, id);
+  res.json({ id });
+}));
+
+// ---------- Koleksi stiker pribadi ----------
+const STK_LIMIT = 40;
+const validSticker = (k, d) => d.length <= 700000 && (
+  (k === 'img' && /^data:image\/(webp|png);base64,/.test(d)) ||
+  (k === 'vid' && /^data:video\/(webm|mp4)[;,]/.test(d)));
+const stkId = d => crypto.createHash('sha1').update(d).digest('hex').slice(0, 16);
+
+app.get('/api/stickers', auth, h(async (req, res) => {
+  const all = (await redis.hgetall('stkpack:' + req.u)) || {};
+  res.json(Object.values(all));
+}));
+
+app.post('/api/stickers/save', auth, h(async (req, res) => {
+  const k = String(req.body.k || ''), d = String(req.body.d || '');
+  if (!validSticker(k, d)) return res.status(400).json({ error: 'Stiker tidak valid' });
+  const id = stkId(d);
+  const key = 'stkpack:' + req.u;
+  const exists = await redis.hexists(key, id);
+  if (!exists && (await redis.hlen(key)) >= STK_LIMIT)
+    return res.status(400).json({ error: 'Koleksi stiker penuh (maks ' + STK_LIMIT + '). Hapus dulu yang nggak dipakai.' });
+  await redis.hset(key, { [id]: { k, d, id } });
+  res.json({ ok: 1, id });
+}));
+
+app.post('/api/stickers/remove', auth, h(async (req, res) => {
+  const id = String(req.body.id || '').replace(/[^a-f0-9]/g, '');
+  if (id) await redis.hdel('stkpack:' + req.u, id);
+  res.json({ ok: 1 });
+}));
+
+// ---------- Pembersihan mingguan (Vercel Cron) ----------
+// Hapus pesan yang umurnya lebih dari 7 hari di semua chat biar database nggak jebol.
+// Dijadwalkan di vercel.json. Butuh env CRON_SECRET (Vercel ngirim otomatis).
+app.get('/api/cron/cleanup', h(async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.get('authorization') !== 'Bearer ' + secret) return res.status(401).end();
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+
+  const chats = new Set(['global', ...(await redis.smembers('allchats'))]);
+  const users = await redis.smembers('users');
+  for (let i = 0; i < users.length; i += 50) {
+    const sets = await Promise.all(users.slice(i, i + 50).map(u => redis.smembers('uchats:' + u)));
+    sets.forEach(st => st.forEach(c => chats.add(c)));
+  }
+
+  let trimmed = 0, removed = 0;
+  for (const chat of chats) {
+    const all = await redis.lrange('c:' + chat, 0, -1);
+    if (!all || !all.length) continue;
+    let members = null;
+    if (chat.startsWith('dm:')) members = chat.slice(3).split(':');
+    if (chat.startsWith('grp:')) {
+      const g = await redis.get('group:' + chat.slice(4));
+      if (!g) { // grup sudah dihapus: sisa pesannya ikut dibuang
+        await Promise.all([redis.del('c:' + chat), redis.srem('allchats', chat)]);
+        continue;
+      }
+      members = g.members;
+    }
+
+    const keep = all.filter(m => m && m.ts >= cutoff);
+    if (keep.length === all.length) continue;
+
+    removed += all.length - keep.length;
+    trimmed++;
+    await redis.del('c:' + chat);
+    for (let i = 0; i < keep.length; i += 50) await redis.rpush('c:' + chat, ...keep.slice(i, i + 50));
+    await bump(chat, members || []);
+  }
+  res.json({ ok: 1, chats: trimmed, removed });
+}));
+
+if (require.main === module) {
+  app.use(express.static(path.join(__dirname, '../public')));
+  app.listen(3000, () => console.log('jalan di http://localhost:3000'));
 }
-</script>
-</body>
-</html>
+module.exports = app;
