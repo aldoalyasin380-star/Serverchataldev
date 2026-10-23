@@ -24,9 +24,9 @@ const SYSTEM_CONFIG = {
   mainGroupName: "Global Group",
   mainGroupAvatar: "https://files.catbox.moe/5k43y6.jpg",
   devBadgeColor: {
-    rainbow: true,
+    rainbow: false,
     red: false,
-    orange: false,
+    orange: true,
     yellow: false,
     blue: false
   }
