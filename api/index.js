@@ -51,7 +51,8 @@ const h = fn => (req, res) =>
 // Kalau IP beda DAN perangkatnya bukan perangkat yang dulu dipakai bikin akun -> ditolak.
 // Kunci perangkat (x-device) dipakai biar pemilik akun nggak ke-lock sendiri waktu IP HP-nya
 // ganti (data seluler / pindah wifi). Orang lain nggak punya kunci itu.
-const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000]; // mati, 1 jam, 24 jam, 7 hari, 30 hari
+const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000];
+const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter // mati, 1 jam, 24 jam, 7 hari, 30 hari
 const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
 const BLOCK_MSG = 'Username sudah digunakan, gunakan username lain';
 const bindCache = new Map();
@@ -82,12 +83,9 @@ async function checkBind(u, req) {
   const ip = ipOf(req), dev = String(req.get('x-device') || '');
   let b = await getBind(u);
   if (!b) {
-    // akun lama (dibuat sebelum fitur ini) terikat ke perangkat pertama yang membukanya
+    // belum ada ikatan: JANGAN diklaim orang yang login duluan. Harus lewat kode pemulihan.
     if (!(await redis.exists('user:' + u))) return { ok: false, nouser: true };
-    const nb = { ip, dev: crypto.randomBytes(12).toString('hex'), t: Date.now() };
-    if (await redis.setnx('bind:' + u, nb)) { cacheBind(u, nb); return { ok: true, dev: nb.dev }; }
-    b = await redis.get('bind:' + u);
-    if (!b) return { ok: false };
+    return { ok: false };
   }
   const sameIp = !!ip && b.ip === ip;
   const sameDev = !!dev && dev === b.dev;
@@ -164,7 +162,10 @@ app.post('/api/register', h(async (req, res) => {
   if (existingUser) {
     // pemulihan owner: kode rahasia (APP_SECRET) dari layar login -> kunci akun ke HP/IP ini
     const secret = process.env.APP_SECRET;
-    if (secret && username === 'aldev' && req.body.recoverKey === secret) {
+    const raw = String(req.body.recoverKey || '').trim();
+    const ownKey = !!existingUser.rc && raw.toUpperCase() === existingUser.rc;   // kode pribadi, nggak case-sensitive
+    const ownerKey = !!secret && raw === secret && (username === 'aldev' || !existingUser.rc); // kode owner, persis
+    if (raw && (ownKey || ownerKey)) {
       const b = await forceBind(username, req);
       res.set('x-device', b.dev);
       return res.json({ username: existingUser.username, recovered: true });
@@ -178,7 +179,7 @@ app.post('/api/register', h(async (req, res) => {
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
 
   const isAldev = username === 'aldev';
-  const userData = { username, name, bio: '', av: 0, verified: isAldev ? true : false, created: Date.now() };
+  const userData = { username, name, bio: '', av: 0, verified: isAldev ? true : false, created: Date.now(), rc: newRc() };
 
   await redis.set('user:' + username, userData);
   await redis.sadd('users', username);
@@ -192,6 +193,7 @@ app.post('/api/register', h(async (req, res) => {
 app.get('/api/me', auth, h(async (req, res) => {
   let me = await redis.get('user:' + req.u);
   if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan' });
+  if (!me.rc) { me.rc = newRc(); await redis.set('user:' + req.u, me); }
   if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
   
   await redis.set('online:' + req.u, Date.now(), { ex: 30 });
@@ -276,6 +278,7 @@ app.get('/api/group-members', auth, h(async (req, res) => {
   }
 
   const devBadge = getDevBadgeColor();
+  const gAdm = chat === 'global' ? new Set(await redis.smembers('gadmins')) : new Set();
   const rows = usernames.length ? await redis.mget(...usernames.map(u => 'user:' + u)) : [];
   const onlineKeys = usernames.length ? await redis.mget(...usernames.map(u => 'online:' + u)) : [];
 
@@ -285,7 +288,7 @@ app.get('/api/group-members', auth, h(async (req, res) => {
     const isOnline = !!onlineKeys[i];
     if (isOnline) onlineCount++;
     const isOwner = groupData ? groupData.owner === u : u === 'aldev';
-    const isAdmin = groupData ? (groupData.admins || [groupData.owner]).includes(u) : true;
+    const isAdmin = groupData ? (groupData.admins || [groupData.owner]).includes(u) : gAdm.has(u);
 
     return {
       username: u,
@@ -556,6 +559,21 @@ app.post('/api/groups', auth, h(async (req, res) => {
 
 app.post('/api/groups/update', auth, h(async (req, res) => {
   const { code, name, avatar, action, targetUser } = req.body;
+  if ((code === SYSTEM_CONFIG.mainGroupId || code === 'global') && (action === 'promote' || action === 'demote') && targetUser) {
+    const tu = clean(targetUser);
+    const gAdmin = req.u === 'aldev' || (await redis.smembers('gadmins')).includes(req.u);
+    if (!gAdmin) return res.status(403).json({ error: 'Cuma admin atau owner yang bisa mengatur admin' });
+    if (action === 'promote') {
+      if (!(await redis.exists('user:' + tu))) return res.status(404).json({ error: 'User tidak ditemukan' });
+      await redis.sadd('gadmins', tu);
+    } else {
+      if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner yang bisa menurunkan admin' });
+      if (tu === 'aldev') return res.status(400).json({ error: 'Owner tidak bisa diturunkan' });
+      await redis.srem('gadmins', tu);
+    }
+    await redis.incr('ver:global');
+    return res.json({ ok: 1 });
+  }
   if (code === SYSTEM_CONFIG.mainGroupId || code === 'global') {
     return res.status(403).json({ error: 'Grup utama dikunci dan tidak bisa diubah/dihapus!' });
   }
@@ -581,6 +599,8 @@ app.post('/api/groups/update', auth, h(async (req, res) => {
 
   if (action === 'kick' && targetUser) {
     if (targetUser === g.owner) return res.status(400).json({ error: 'Owner grup tidak dapat dikeluarkkan!' });
+    if (!isAdmin) return res.status(403).json({ error: 'Cuma admin yang bisa mengeluarkan anggota' });
+    if (!isOwner && (g.admins || []).includes(targetUser)) return res.status(403).json({ error: 'Admin hanya bisa dikeluarkan owner' });
     g.members = g.members.filter(m => m !== targetUser);
     g.admins = (g.admins || []).filter(a => a !== targetUser);
     await redis.set('group:' + code, g);
@@ -590,9 +610,19 @@ app.post('/api/groups/update', auth, h(async (req, res) => {
   }
 
   if (action === 'promote' && targetUser) {
-    if (!isOwner) return res.status(403).json({ error: 'Hanya Owner yang bisa menaikkan Admin!' });
+    if (!isAdmin) return res.status(403).json({ error: 'Cuma admin atau owner yang bisa menaikkan admin' });
+    if (!g.members.includes(targetUser)) return res.status(400).json({ error: 'Dia bukan anggota grup' });
     g.admins = g.admins || [];
     if (!g.admins.includes(targetUser)) g.admins.push(targetUser);
+    await redis.set('group:' + code, g);
+    await bump('grp:' + code, g.members);
+    return res.json({ ok: 1 });
+  }
+
+  if (action === 'demote' && targetUser) {
+    if (!isOwner) return res.status(403).json({ error: 'Cuma owner yang bisa menurunkan admin' });
+    if (targetUser === g.owner) return res.status(400).json({ error: 'Owner tidak bisa diturunkan' });
+    g.admins = (g.admins || []).filter(a => a !== targetUser);
     await redis.set('group:' + code, g);
     await bump('grp:' + code, g.members);
     return res.json({ ok: 1 });
