@@ -178,6 +178,8 @@ select{background:var(--panel);border:1px solid var(--line);border-radius:10px;p
 select:focus{border-color:var(--ac)}
 .stk{width:150px;height:150px;object-fit:contain;display:block;background:transparent}
 .stk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.stk-wrap{position:relative}
+.stk-del{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:#ff4d4d;color:#fff;border:0;font-size:12px;line-height:22px;padding:0;cursor:pointer}
 .stk-cell{aspect-ratio:1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;display:grid;place-items:center;overflow:hidden}
 .stk-cell img,.stk-cell video{width:100%;height:100%;object-fit:contain}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -195,7 +197,7 @@ select:focus{border-color:var(--ac)}
       <label>Nama (Khusus Pengguna Baru)</label>
       <input id="rName" maxlength="30" placeholder="Nama kamu (jika baru daftar)">
       <div id="recBox" class="hidden">
-        <label>Kode pemulihan owner</label>
+        <label>Kode pemulihan</label>
         <input id="recKey" type="password" placeholder="kode rahasia owner" autocomplete="off">
       </div>
       <div class="err" id="aErr"></div>
@@ -536,9 +538,9 @@ async function showGroupInfo() {
           </div>
         </div>
         <span class="m-role">${m.role.toUpperCase()}</span>
-        ${canManage && c.type === 'group' ? `
-          <button class="btn danger" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="kickMember('${m.username}')">Kick</button>
-        ` : ''}
+        ${canManage && m.role === 'member' ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="setRole('${m.username}','promote')">⬆ Admin</button>` : ''}
+        ${canManage && m.role === 'admin' && myRole === 'owner' ? `<button class="btn g" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="setRole('${m.username}','demote')">⬇ Admin</button>` : ''}
+        ${canManage && c.type === 'group' && m.role !== 'admin' ? `<button class="btn danger" style="padding:4px 8px;font-size:11px;margin-left:6px" onclick="kickMember('${m.username}')">Kick</button>` : ''}
       </div>`;
     }).join('');
 
@@ -563,6 +565,22 @@ async function showGroupInfo() {
       </div>` : ''}
     `);
   } catch(e) { toast(e.message); }
+}
+
+async function setRole(u, action) {
+  const c = chats.find(x => x.id === active);
+  if (!c) return;
+  try {
+    await api('groups/update', { code: c.type === 'global' ? 'global' : c.code, action, targetUser: u });
+    toast(action === 'promote' ? 'Dijadikan admin' : 'Admin dicabut');
+    await showGroupInfo();
+  } catch (e) { toast(e.message); }
+}
+
+async function removeSticker(id) {
+  if (!confirm('Hapus stiker ini dari koleksimu?')) return;
+  try { await api('stickers/remove', { id }); toast('Stiker dihapus'); openStickerTray(); }
+  catch (e) { toast(e.message); }
 }
 
 async function kickMember(u) {
@@ -879,7 +897,7 @@ async function openStickerTray() {
   if (!active) return toast('Pilih chat dulu');
   let pack = [];
   try { pack = await api('stickers'); } catch (e) {}
-  const all = [...STK.recent, ...pack.filter(p => !STK.recent.some(r => r.d === p.d))];
+  const all = [...pack, ...STK.recent.filter(r => !pack.some(p => p.d === r.d))];
   modal(`<h3>🏷️ Stiker <button class="ico" onclick="closeModal()">✕</button></h3>
     <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Foto jadi stiker gambar. Video (maks ${STK.maxVid} detik) jadi stiker yang bergerak dan berulang.</p>
     <button class="btn" style="width:100%" onclick="pickSticker()">➕ Buat stiker dari foto / video</button>
@@ -887,11 +905,21 @@ async function openStickerTray() {
     ${all.length ? '' : '<div style="color:var(--mu);font-size:13px;padding:14px 0 0;text-align:center">Belum ada stiker. Buat sendiri, atau ketuk stiker di chat lalu simpan.</div>'}`);
   const grid = $('#stkGrid');
   all.forEach(x => {
+    const w = document.createElement('div');
+    w.className = 'stk-wrap';
     const b = document.createElement('button');
     b.className = 'stk-cell';
     b.innerHTML = x.k === 'vid' ? `<video src="${x.d}" autoplay loop muted playsinline></video>` : `<img src="${x.d}" alt="">`;
     b.onclick = () => sendSticker(x);
-    grid.appendChild(b);
+    w.appendChild(b);
+    if (x.id) {
+      const d = document.createElement('button');
+      d.className = 'stk-del';
+      d.textContent = '✕';
+      d.onclick = () => removeSticker(x.id);
+      w.appendChild(d);
+    }
+    grid.appendChild(w);
   });
 }
 
@@ -1128,6 +1156,9 @@ $('#gear').onclick = async () => {
   <div style="font-size:11px;color:var(--mu);margin-top:4px">Pesan lama hilang dari tampilan akunmu. Bisa diatur beda per chat lewat menu ⋮ di dalam chat.</div>
   <label>Notifikasi</label>
   <button class="btn g" id="nBtn" ${notifOn ? 'disabled' : ''} onclick="askNotif()">${notifOn ? 'Notifikasi aktif' : 'Aktifkan notifikasi'}</button>
+  <label>Kode pemulihan</label>
+  <div class="code"><span>${me.rc || '-'}</span><button class="btn" onclick="copy('${me.rc || ''}')">Salin</button></div>
+  <div style="font-size:11px;color:var(--mu);margin-top:4px">Pakai kode ini kalau akunmu ketahan di HP/IP baru. Simpan dan jangan dibagiin.</div>
   <label>Centang biru ${badge(me.username)}</label>
   ${me.verified || me.username === 'aldev' ? '<div class="ms">Akun kamu sudah terverifikasi.</div>' : me.missions.map(m => `<div class="ms"><div class="r"><span>${m.t}</span><span>${m.n}/${m.max}</span></div><div class="bar"><i style="width:${m.n / m.max * 100}%"></i></div></div>`).join('') +
     `<button class="btn" style="margin-top:6px" ${done ? '' : 'disabled'} onclick="claim()">${done ? 'Klaim centang biru' : 'Selesaikan misi dulu'}</button>`}
