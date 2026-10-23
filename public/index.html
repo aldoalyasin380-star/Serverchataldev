@@ -182,6 +182,14 @@ select:focus{border-color:var(--ac)}
 .stk-del{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:#ff4d4d;color:#fff;border:0;font-size:12px;line-height:22px;padding:0;cursor:pointer}
 .stk-cell{aspect-ratio:1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;display:grid;place-items:center;overflow:hidden}
 .stk-cell img,.stk-cell video{width:100%;height:100%;object-fit:contain}
+.mt{color:var(--ac);font-weight:600;background:#3ddc9722;border-radius:5px;padding:0 3px;cursor:pointer}
+.mt.me{background:#ffd23f33;color:#ffd23f}
+#chat{position:relative}
+.mention-box{position:absolute;left:10px;right:10px;bottom:70px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px;z-index:20;box-shadow:0 8px 24px #000a;max-height:280px;overflow:auto}
+.mention-box.hidden{display:none!important}
+.mention-box button{display:flex;gap:10px;align-items:center;width:100%;padding:8px;border-radius:10px;text-align:left}
+.mention-box button:hover{background:var(--bg)}
+.mention-box small{color:var(--mu)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -269,7 +277,8 @@ select:focus{border-color:var(--ac)}
 const $ = s => document.querySelector(s);
 let myUsername = localStorage.getItem('myUsername') || null;
 let me = null, chats = [], active = null, msgs = [], start = 0, ver = '', prof = {}, prevCount = null, timer, people = [];
-let replyTo = null, editingIdx = null;
+let replyTo = null, editingIdx = null, curMod = false;
+let mentionCache = {}, seenLast = {};
 let rendered = new Set(), firstRender = true, stick = false;
 let subBase = '', typingNames = [], typingKey = '', lastHb = 0, lastTyping = 0;
 let pinnedChats = JSON.parse(localStorage.getItem('pinnedChats') || '[]');
@@ -286,6 +295,7 @@ const fmt = s => esc(s)
   .replace(/(^|\s)_([^_\n]+)_(?=\s|$|[.,!?])/g, '$1<i>$2</i>')
   .replace(/(^|\s)~([^~\n]+)~(?=\s|$|[.,!?])/g, '$1<s>$2</s>')
   .replace(/\|\|([^|\n]+)\|\|/g, '<span class="sp" onclick="this.classList.toggle(\'on\')">$1</span>')
+  .replace(/(^|\s)@([a-z0-9_.]{3,20})(?![a-z0-9_.])/gi, (x, p, u) => p + '<span class="mt' + (u.toLowerCase() === myUsername ? ' me' : '') + '" onclick="startDm(\'' + u.toLowerCase() + '\')">@' + u + '</span>')
   .replace(/\n/g, '<br>');
 
 const getBadgeSvg = (color = 'blue') => {
@@ -421,9 +431,39 @@ const unread = c => (c.id === active && !document.hidden) ? 0 : Math.max(0, c.co
 async function loadChats() {
   const list = await api('chats');
   await ensureProfiles([...list.filter(c => c.type === 'dm').map(c => c.other), ...list.map(c => c.last && c.last.u)], true);
+  checkNotifs(list);
   chats = list;
   renderList();
   if (active) renderSub();
+}
+
+function beep() {
+  try {
+    const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain();
+    o.connect(g); g.connect(a.destination); o.frequency.value = 760;
+    g.gain.setValueAtTime(0.12, a.currentTime); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.25);
+    o.start(); o.stop(a.currentTime + 0.25);
+  } catch (e) {}
+}
+function checkNotifs(list) {
+  list.forEach(c => {
+    const l = c.last;
+    if (!l) return;
+    const prev = seenLast[c.id];
+    seenLast[c.id] = l.ts;
+    if (prev === undefined || l.ts <= prev || l.u === myUsername) return;
+    const tag = !!(l.mn && l.mn.includes(myUsername));
+    if (!tag && c.id === active && !document.hidden) return;   // lagi buka chat ini
+    if (!tag && mutedChats.includes(c.id)) return;             // chat dibisukan
+    const who = c.type === 'dm' ? nameOf(c.other) : c.title;
+    const body = (c.type === 'dm' ? '' : nameOf(l.u) + ': ') + previewOf(l).slice(0, 100);
+    const title = (tag ? '📣 ' : '') + who;
+    beep(); if (navigator.vibrate) navigator.vibrate(120);
+    if (!document.hidden) toast(title + ' — ' + body);
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(title, { body, tag: c.id }); } catch (e) {}
+    }
+  });
 }
 
 function renderList() {
@@ -708,7 +748,7 @@ async function loadMessages() {
   const j = await api('messages?chat=' + encodeURIComponent(id));
   if (id !== active) return;
   await ensureProfiles(j.msgs.flatMap(m => [m.u, m.re && m.re.u]));
-  msgs = j.msgs; start = j.start;
+  msgs = j.msgs; start = j.start; curMod = !!j.mod;
   renderMsgs();
   seen[id] = Math.max(seen[id] || 0, j.total); saveSeen();
   renderList();
@@ -721,15 +761,17 @@ function renderMsgs() {
   const c = chats.find(x => x.id === active);
   const grp = c && c.type !== 'dm';
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
+  let pingTag = null;
   box.innerHTML = msgs.map((m, k) => {
     const mine = m.u === myUsername, idx = m.i ?? (start + k);
     const key = active + ':' + idx;
     const fresh = !firstRender && !rendered.has(key);
     rendered.add(key);
+    if (fresh && m.mn && m.mn.includes(myUsername) && m.u !== myUsername) pingTag = nameOf(m.u);
     const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
 
     let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk" onclick="stkTap(${idx})"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker" onclick="stkTap(${idx})">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
-    const canDelete = mine || myUsername === 'aldev';
+    const canDelete = mine || curMod;
     const quote = m.re && !m.deleted ? `<div class="qt" onclick="jumpTo(${m.re.i})"><b>${esc(nameOf(m.re.u))}</b><span>${esc(m.re.t)}</span></div>` : '';
 
     return `<div class="row ${mine ? 'me' : ''} ${fresh ? 'new' : ''}" data-i="${idx}"><div class="b" ondblclick="react(${idx},'❤️')">
@@ -744,6 +786,7 @@ function renderMsgs() {
       </div></div>
       ${rx && !m.deleted ? `<div class="rx">${rx}</div>` : ''}</div>`;
   }).join('');
+  if (pingTag) { beep(); if (navigator.vibrate) navigator.vibrate(180); toast('📣 ' + pingTag + ' menandai kamu'); }
   if (firstRender) box.scrollTop = box.scrollHeight;
   else if (stick || nearBottom) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
   firstRender = false; stick = false;
@@ -881,6 +924,31 @@ async function send() {
 }
 $('#send').onclick = send;
 $('#inp').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send(); } };
+async function mentionList(chat) {
+  if (!mentionCache[chat]) {
+    const r = await api('group-members?chat=' + encodeURIComponent(chat));
+    mentionCache[chat] = r.members.filter(m => m.username !== myUsername);
+  }
+  return mentionCache[chat];
+}
+function hideMention() { const b = $('#mentionBox'); if (b) b.classList.add('hidden'); }
+async function showMention(q) {
+  const list = (await mentionList(active)).filter(m => !q || m.username.startsWith(q) || m.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!list.length) return hideMention();
+  let b = $('#mentionBox');
+  if (!b) { b = document.createElement('div'); b.id = 'mentionBox'; b.className = 'mention-box'; $('#chat').appendChild(b); }
+  b.innerHTML = list.map(m => `<button onclick="pickMention('${m.username}')">${avUser(m.username, 's')}<span><b>${esc(m.name)}</b> <small>@${m.username}</small></span></button>`).join('');
+  b.classList.remove('hidden');
+}
+function pickMention(u) {
+  $('#inp').value = $('#inp').value.replace(/(^|\s)@[a-z0-9_.]{0,20}$/i, (x, p) => p + '@' + u + ' ');
+  hideMention(); $('#inp').focus();
+}
+$('#inp').addEventListener('input', () => {
+  const m = /(^|\s)@([a-z0-9_.]{0,20})$/i.exec($('#inp').value);
+  if (!m || !active || active.startsWith('dm:')) return hideMention();
+  showMention(m[2].toLowerCase()).catch(() => {});
+});
 $('#inp').addEventListener('input', () => {
   if (!active || !$('#inp').value.trim()) return;
   const n = Date.now();
