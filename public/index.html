@@ -383,7 +383,6 @@ async function boot() {
 }
 
 function drawMe() {
-  checkColor = (me && me.devBadgeColor) || checkColor;
   const color = me.devBadgeColor || 'blue';
   const badgeSvg = (me.verified || me.username === 'aldev') ? getBadgeSvg(color) : '';
   $('#meAv').innerHTML = avUser(me.username);
@@ -493,7 +492,7 @@ function renderList() {
     const isPinned = pinnedChats.includes(c.id);
 
     return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${aHtml}<div class="m">
-      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg(checkColor) : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
+      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
       <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `${c.tagged && u ? '<span class="tagbadge">📣 kamu disebut</span>' : ''}<span class="un">${u}</span>` : ''}</div></div></div></div>`;
   }).join('');
 
@@ -523,7 +522,7 @@ async function openChat(id) {
   $('#chat').classList.remove('hidden');
   const t = c ? (c.type === 'dm' ? nameOf(c.other) : c.title) : '';
   const isVerifiedGroup = id === 'global';
-  const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg(checkColor) : '');
+  const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '');
   
   $('#cName').innerHTML = esc(t) + headerBadge;
   $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : (c.avatar ? `<img class="av s" src="${c.avatar}">` : avText(t, c.id, 's'))) : '';
