@@ -51,7 +51,7 @@ const h = fn => (req, res) =>
 // Kalau IP beda DAN perangkatnya bukan perangkat yang dulu dipakai bikin akun -> ditolak.
 // Kunci perangkat (x-device) dipakai biar pemilik akun nggak ke-lock sendiri waktu IP HP-nya
 // ganti (data seluler / pindah wifi). Orang lain nggak punya kunci itu.
-const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '1', 10); // satu IP cuma boleh bikin sekian akun
+const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '2', 10); // satu IP cuma boleh bikin sekian akun
 const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000];
 const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter // mati, 1 jam, 24 jam, 7 hari, 30 hari
 const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
@@ -181,7 +181,7 @@ app.post('/api/register', h(async (req, res) => {
 
   const isAldev = username === 'aldev';
   if (!isAldev && (await redis.scard('ipacc:' + ipOf(req))) >= MAX_ACC_PER_IP)
-    return res.status(403).json({ error: 'Satu IP cuma bisa bikin 1 akun. Pakai akun yang sudah ada, atau hubungi owner.' });
+    return res.status(403).json({ error: `Satu IP maksimal ${MAX_ACC_PER_IP} akun. Pakai akun yang sudah ada, atau hubungi owner kalau lupa username.` });
   const userData = { username, name, bio: '', av: 0, verified: isAldev ? true : false, created: Date.now(), rc: newRc() };
 
   await redis.set('user:' + username, userData);
@@ -203,7 +203,7 @@ app.get('/api/me', auth, h(async (req, res) => {
   await redis.set('online:' + req.u, Date.now(), { ex: 30 });
   await redis.sadd('days:' + req.u, today());
 
-  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
+  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: getDevBadgeColor() });
 }));
 
 app.post('/api/me', auth, h(async (req, res) => {
@@ -256,7 +256,7 @@ app.post('/api/profiles', auth, h(async (req, res) => {
         out[u] = { 
           name: r.name, 
           v: !!r.verified || u === 'aldev', 
-          badgeColor: u === 'aldev' ? devBadge : 'blue',
+          badgeColor: devBadge,
           a: r.av || 0, 
           bio: r.bio,
           online: !!onlineKeys[i]
@@ -298,7 +298,7 @@ app.get('/api/group-members', auth, h(async (req, res) => {
       username: u,
       name: r.name || u,
       v: !!r.verified || u === 'aldev',
-      badgeColor: u === 'aldev' ? devBadge : 'blue',
+      badgeColor: devBadge,
       a: r.av || 0,
       online: isOnline,
       role: isOwner ? 'owner' : isAdmin ? 'admin' : 'member'
@@ -319,7 +319,7 @@ app.get('/api/users', auth, h(async (req, res) => {
       username: r.username, 
       name: r.name, 
       v: !!r.verified || r.username === 'aldev', 
-      badgeColor: r.username === 'aldev' ? devBadge : 'blue',
+      badgeColor: devBadge,
       a: r.av || 0
     }));
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
