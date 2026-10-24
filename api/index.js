@@ -203,7 +203,7 @@ app.get('/api/me', auth, h(async (req, res) => {
   await redis.set('online:' + req.u, Date.now(), { ex: 30 });
   await redis.sadd('days:' + req.u, today());
 
-  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: getDevBadgeColor() });
+  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
 }));
 
 app.post('/api/me', auth, h(async (req, res) => {
@@ -256,7 +256,7 @@ app.post('/api/profiles', auth, h(async (req, res) => {
         out[u] = { 
           name: r.name, 
           v: !!r.verified || u === 'aldev', 
-          badgeColor: devBadge,
+          badgeColor: u === 'aldev' ? devBadge : 'blue',
           a: r.av || 0, 
           bio: r.bio,
           online: !!onlineKeys[i]
@@ -298,7 +298,7 @@ app.get('/api/group-members', auth, h(async (req, res) => {
       username: u,
       name: r.name || u,
       v: !!r.verified || u === 'aldev',
-      badgeColor: devBadge,
+      badgeColor: u === 'aldev' ? devBadge : 'blue',
       a: r.av || 0,
       online: isOnline,
       role: isOwner ? 'owner' : isAdmin ? 'admin' : 'member'
@@ -319,7 +319,7 @@ app.get('/api/users', auth, h(async (req, res) => {
       username: r.username, 
       name: r.name, 
       v: !!r.verified || r.username === 'aldev', 
-      badgeColor: devBadge,
+      badgeColor: r.username === 'aldev' ? devBadge : 'blue',
       a: r.av || 0
     }));
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
