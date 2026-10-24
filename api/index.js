@@ -47,62 +47,45 @@ const h = fn => (req, res) =>
     res.status(500).json({ error: 'Server lagi error, coba lagi' });
   });
 
-// ---------- Akun dikunci ke IP pembuatnya ----------
-// Kalau IP beda DAN perangkatnya bukan perangkat yang dulu dipakai bikin akun -> ditolak.
-// Kunci perangkat (x-device) dipakai biar pemilik akun nggak ke-lock sendiri waktu IP HP-nya
-// ganti (data seluler / pindah wifi). Orang lain nggak punya kunci itu.
-const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '2', 10); // satu IP cuma boleh bikin sekian akun
-const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000];
-const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter // mati, 1 jam, 24 jam, 7 hari, 30 hari
-const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
+// ---------- Sesi login (token di server; nggak bergantung IP / kunci browser) ----------
+const SESS_TTL = 60 * 60 * 24 * 365; // setahun
 const BLOCK_MSG = 'Username sudah digunakan, gunakan username lain';
-const bindCache = new Map();
+const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000]; // mati, 1 jam, 24 jam, 7 hari, 30 hari
+const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
+const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '2', 10); // satu IP maksimal sekian akun
+const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // kode pemulihan 8 karakter
+const SESS_CLEAR = 'ns=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure';
 
 function ipOf(req) {
   let ip = req.get('x-vercel-forwarded-for') || req.get('x-real-ip') || req.get('x-forwarded-for') || (req.socket && req.socket.remoteAddress) || '';
   ip = String(ip).split(',')[0].trim().replace(/^::ffff:/, '');
-  // IPv6: HP sering ganti bagian belakangnya, jadi yang dibandingin 64 bit depan aja
   if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':');
   return ip;
 }
-const cacheBind = (u, b) => bindCache.set(u, { b, exp: Date.now() + 60000 });
-async function getBind(u) {
-  const c = bindCache.get(u);
-  if (c && c.exp > Date.now()) return c.b;
-  const b = await redis.get('bind:' + u);
-  if (b) cacheBind(u, b);
-  return b;
+function tokOf(req) {
+  const h = req.get('x-session');
+  if (h) return String(h);
+  const m = /(?:^|;\s*)ns=([a-f0-9]{48})/.exec(req.get('cookie') || '');
+  return m ? m[1] : '';
 }
-async function forceBind(u, req) {
-  const b = { ip: ipOf(req), dev: crypto.randomBytes(12).toString('hex'), t: Date.now() };
-  await redis.set('bind:' + u, b);
-  cacheBind(u, b);
-  return { ok: true, dev: b.dev };
+async function sessUser(req) {
+  const t = tokOf(req);
+  if (!/^[a-f0-9]{48}$/.test(t)) return null;
+  return (await redis.get('sess:' + t)) || null;
 }
-// -> { ok:true, dev } | { ok:false, nouser?:true }
-async function checkBind(u, req) {
-  const ip = ipOf(req), dev = String(req.get('x-device') || '');
-  let b = await getBind(u);
-  if (!b) {
-    // belum ada ikatan: JANGAN diklaim orang yang login duluan. Harus lewat kode pemulihan.
-    if (!(await redis.exists('user:' + u))) return { ok: false, nouser: true };
-    return { ok: false };
-  }
-  const sameIp = !!ip && b.ip === ip;
-  const sameDev = !!dev && dev === b.dev;
-  if (!sameDev) return { ok: false };   // IP aja nggak cukup: harus perangkat yang sama
-  if (!sameIp) { b.ip = ip; await redis.set('bind:' + u, b); cacheBind(u, b); } // perangkat sama, IP baru -> IP baru dipercaya
-  return { ok: true, dev: b.dev };
+async function issueSession(u, res) {
+  const tok = crypto.randomBytes(24).toString('hex');
+  await redis.set('sess:' + tok, u, { ex: SESS_TTL });
+  res.set('x-session', tok);
+  res.set('Set-Cookie', `ns=${tok}; Path=/; Max-Age=${SESS_TTL}; HttpOnly; SameSite=Lax; Secure`);
+  return tok;
 }
 
 async function auth(req, res, next) {
   try {
-    const u = clean(req.get('x-user'));
+    const u = await sessUser(req);
     if (!u) return res.status(401).json({ error: 'Belum login' });
-    const r = await checkBind(u, req);
-    if (r.nouser) return res.status(401).json({ error: 'Akun tidak ditemukan' });
-    if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
-    res.set('x-device', r.dev);
+    if (!(await redis.exists('user:' + u))) return res.status(401).json({ error: 'Akun tidak ditemukan' });
     req.u = u;
     next();
   } catch (e) {
@@ -161,20 +144,21 @@ app.post('/api/register', h(async (req, res) => {
 
   const existingUser = await redis.get('user:' + username);
   if (existingUser) {
-    // pemulihan owner: kode rahasia (APP_SECRET) dari layar login -> kunci akun ke HP/IP ini
+    // sudah login di perangkat ini (punya sesi yang valid)?
+    if ((await sessUser(req)) === username) {
+      const tok = await issueSession(username, res);
+      return res.json({ username: existingUser.username, token: tok });
+    }
+    // pemulihan: kode pribadi user, atau kode owner (APP_SECRET) khusus aldev / akun lama tanpa kode
     const secret = process.env.APP_SECRET;
     const raw = String(req.body.recoverKey || '').trim();
-    const ownKey = !!existingUser.rc && raw.toUpperCase() === existingUser.rc;   // kode pribadi, nggak case-sensitive
-    const ownerKey = !!secret && raw === secret && (username === 'aldev' || !existingUser.rc); // kode owner, persis
+    const ownKey = !!existingUser.rc && raw.toUpperCase() === existingUser.rc;
+    const ownerKey = !!secret && raw === secret && (username === 'aldev' || !existingUser.rc);
     if (raw && (ownKey || ownerKey)) {
-      const b = await forceBind(username, req);
-      res.set('x-device', b.dev);
-      return res.json({ username: existingUser.username, recovered: true });
+      const tok = await issueSession(username, res);
+      return res.json({ username: existingUser.username, recovered: true, token: tok });
     }
-    const r = await checkBind(username, req);
-    if (!r.ok) return res.status(403).json({ error: BLOCK_MSG, blocked: true });
-    res.set('x-device', r.dev);
-    return res.json({ username: existingUser.username });
+    return res.status(403).json({ error: BLOCK_MSG, blocked: true, needCode: true });
   }
 
   if (!name) return res.status(400).json({ error: 'Nama wajib diisi untuk pendaftaran akun baru' });
@@ -189,9 +173,15 @@ app.post('/api/register', h(async (req, res) => {
   await redis.sadd('uchats:' + username, 'global');
 
   await redis.sadd('ipacc:' + ipOf(req), username);
-  const bound = await forceBind(username, req);
-  res.set('x-device', bound.dev);
-  res.json({ username });
+  const tok = await issueSession(username, res);
+  res.json({ username, token: tok });
+}));
+
+app.post('/api/logout', h(async (req, res) => {
+  const t = tokOf(req);
+  if (/^[a-f0-9]{48}$/.test(t)) await redis.del('sess:' + t);
+  res.set('Set-Cookie', SESS_CLEAR);
+  res.json({ ok: 1 });
 }));
 
 app.get('/api/me', auth, h(async (req, res) => {
