@@ -193,6 +193,8 @@ select:focus{border-color:var(--ac)}
 .mention-box small{color:var(--mu)}
 .seen{font-size:11px;color:var(--mu);text-align:right;margin-top:2px}
 .tagbadge{font-size:11px;color:#ffd23f;margin-right:6px;font-weight:600}
+@keyframes hueRot{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}
+.bl.rainbow{animation:hueRot 2.4s linear infinite}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -281,6 +283,7 @@ const $ = s => document.querySelector(s);
 let myUsername = localStorage.getItem('myUsername') || null;
 let me = null, chats = [], active = null, msgs = [], start = 0, ver = '', prof = {}, prevCount = null, timer, people = [];
 let replyTo = null, editingIdx = null, curMod = false;
+let checkColor = 'blue';
 let mentionCache = {}, seenLast = {};
 let rendered = new Set(), firstRender = true, stick = false;
 let subBase = '', typingNames = [], typingKey = '', lastHb = 0, lastTyping = 0;
@@ -301,12 +304,8 @@ const fmt = s => esc(s)
   .replace(/(^|\s)@([a-z0-9_.]{3,20})(?![a-z0-9_.])/gi, (x, p, u) => p + '<span class="mt' + (u.toLowerCase() === myUsername ? ' me' : '') + '" onclick="startDm(\'' + u.toLowerCase() + '\')">@' + u + '</span>')
   .replace(/\n/g, '<br>');
 
-const getBadgeSvg = (color = 'blue') => {
-  const rainbow = color === 'rainbow';
-  const defs = rainbow ? '<defs><linearGradient id="ckRb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff3b3b"/><stop offset=".25" stop-color="#ffd23f"/><stop offset=".5" stop-color="#3ddc97"/><stop offset=".75" stop-color="#2f81f7"/><stop offset="1" stop-color="#b56bff"/></linearGradient></defs>' : '';
-  const fill = rainbow ? 'url(#ckRb)' : '#2f81f7';
-  return `<svg class="bl ${color}" viewBox="0 0 24 24">${defs}<circle cx="12" cy="12" r="11" fill="${fill}"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-};
+const CHECK_HEX = { blue: '#2f81f7', orange: '#ff8c00', red: '#ff4d4d', yellow: '#ffd23f', rainbow: '#ff3b3b' };
+const getBadgeSvg = (color = 'blue') => `<svg class="bl ${color}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="${CHECK_HEX[color] || CHECK_HEX.blue}"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 const nameOf = u => (prof[u] && prof[u].name) || u;
 const badge = u => {
@@ -384,6 +383,7 @@ async function boot() {
 }
 
 function drawMe() {
+  checkColor = (me && me.devBadgeColor) || checkColor;
   const color = me.devBadgeColor || 'blue';
   const badgeSvg = (me.verified || me.username === 'aldev') ? getBadgeSvg(color) : '';
   $('#meAv').innerHTML = avUser(me.username);
@@ -493,7 +493,7 @@ function renderList() {
     const isPinned = pinnedChats.includes(c.id);
 
     return `<div class="item ${c.id === active ? 'on' : ''}" onclick="openChat('${c.id}')">${aHtml}<div class="m">
-      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
+      <div class="t"><b>${esc(title(c))}${c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg(checkColor) : '')}</b><small>${c.last ? time(c.last.ts) : ''}</small></div>
       <div class="p"><span>${esc(prev)}</span><div>${isPinned ? '<span class="pinned-tag">📌</span>' : ''}${u ? `${c.tagged && u ? '<span class="tagbadge">📣 kamu disebut</span>' : ''}<span class="un">${u}</span>` : ''}</div></div></div></div>`;
   }).join('');
 
@@ -523,10 +523,10 @@ async function openChat(id) {
   $('#chat').classList.remove('hidden');
   const t = c ? (c.type === 'dm' ? nameOf(c.other) : c.title) : '';
   const isVerifiedGroup = id === 'global';
-  const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg('blue') : '');
+  const headerBadge = c && c.type === 'dm' ? badge(c.other) : (isVerifiedGroup ? getBadgeSvg(checkColor) : '');
   
   $('#cName').innerHTML = esc(t) + headerBadge;
-  $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : avText(t, c.id, 's')) : '';
+  $('#cAv').innerHTML = c ? (c.type === 'dm' ? avUser(c.other, 's') : (c.avatar ? `<img class="av s" src="${c.avatar}">` : avText(t, c.id, 's'))) : '';
 
   updateHeaderSub();
   $('#msgs').innerHTML = '';
@@ -614,7 +614,8 @@ async function showGroupInfo() {
 async function adminRc(u) {
   try {
     const r = await api('admin/rc', { user: u });
-    modal(`<h3>🔑 Kode pemulihan ${esc(nameOf(u))} <button class="ico" onclick="closeModal()">✕</button></h3>
+    modal(`<h3>🔑 Kode pemulihan <button class="ico" onclick="closeModal()">✕</button></h3>
+      <div style="margin-bottom:8px"><b>${esc(nameOf(u))}</b> <span style="color:var(--mu)">· username: <b>@${u}</b></span></div>
       <p style="color:var(--mu);font-size:12px;margin-bottom:10px">Kasih kode ini ke pemilik akun. Dipakai di layar login kalau akunnya ketahan.</p>
       <div class="code"><span>${r.rc}</span><button class="btn" onclick="copy('${r.rc}')">Salin</button></div>`);
   } catch (e) { toast(e.message); }
