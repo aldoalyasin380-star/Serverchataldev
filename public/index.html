@@ -332,16 +332,15 @@ const devKeys = () => { try { return JSON.parse(localStorage.getItem('devKeys') 
 function setDevKey(u, k) { const d = devKeys(); d[u] = k; localStorage.setItem('devKeys', JSON.stringify(d)); }
 
 async function api(path, body) {
-  const who = (path === 'register' && body) ? cleanU(body.username) : myUsername;
-  const o = { headers: { 'x-user': myUsername || who || '', 'x-device': devKeys()[who] || '', 'content-type': 'application/json' } };
-  if (path === 'register' && body) o.headers['x-user'] = who;
+  const o = { headers: { 'x-session': localStorage.getItem('sessTok') || '', 'content-type': 'application/json' } };
   if (body) { o.method = 'POST'; o.body = JSON.stringify(body); }
   const r = await fetch('/api/' + path, o);
-  const nd = r.headers.get('x-device');
-  if (nd && who && devKeys()[who] !== nd) setDevKey(who, nd);
   const j = await r.json().catch(() => ({}));
+  if (j.token) localStorage.setItem('sessTok', j.token);
+  const hdr = r.headers.get('x-session');
+  if (hdr) localStorage.setItem('sessTok', hdr);
+  // sesi habis / dicabut -> balik ke layar login. Respons 403 (username dipakai / butuh kode) TIDAK logout.
   if (r.status === 401 && myUsername) logout();
-  if (r.status === 403 && j.blocked && myUsername) { sessionStorage.setItem('authErr', j.error || ''); logout(); }
   if (!r.ok) { const err = new Error(j.error || 'Gagal'); err.blocked = !!j.blocked; throw err; }
   return j;
 }
@@ -368,7 +367,12 @@ $('#aGo').onclick = async () => {
   }
 };
 
-function logout() { localStorage.removeItem('myUsername'); localStorage.removeItem('seen'); location.reload(); }
+function logout() {
+  const t = localStorage.getItem('sessTok');
+  localStorage.removeItem('myUsername'); localStorage.removeItem('sessTok'); localStorage.removeItem('seen');
+  if (t) fetch('/api/logout', { method: 'POST', headers: { 'x-session': t } }).catch(() => {});
+  location.reload();
+}
 
 async function boot() {
   $('#auth').classList.add('hidden'); 
