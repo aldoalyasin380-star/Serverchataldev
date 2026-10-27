@@ -195,6 +195,17 @@ select:focus{border-color:var(--ac)}
 .tagbadge{font-size:11px;color:#ffd23f;margin-right:6px;font-weight:600}
 @keyframes hueRot{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}
 .bl.rainbow{animation:hueRot 2.4s linear infinite}
+.att-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+.att-grid button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 6px;border-radius:12px;background:var(--bg);border:1px solid var(--line);font-size:12.5px}
+.att-grid span{font-size:24px}
+.msgimg{max-width:240px;width:100%;border-radius:10px;display:block}
+.fileb{display:block;color:var(--ac);word-break:break-all;padding:4px 0}
+.poll{min-width:210px}
+.popt{position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;padding:8px 10px;margin:4px 0;border-radius:10px;background:var(--bg);border:1px solid var(--line);overflow:hidden;text-align:left}
+.popt i{position:absolute;left:0;top:0;bottom:0;background:#3ddc9733;z-index:0}
+.popt span,.popt small{position:relative;z-index:1}
+.popt.mine{border-color:var(--ac)}
+.muted{color:var(--mu);font-size:11px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -262,6 +273,7 @@ select:focus{border-color:var(--ac)}
       </div>
       <div class="comp">
         <input id="inp" placeholder="Tulis pesan..." maxlength="2000" autocomplete="off">
+        <button class="btn g" id="attBtn" title="Lampiran">📎</button>
         <button class="btn g" id="stkBtn" title="Stiker">😺</button>
         <button class="btn g" id="vnBtn" title="Tekan untuk Rekam VN">🎙️</button>
         <button class="btn danger hidden" id="cancelVnBtn" title="Batalkan VN">🛑</button>
@@ -772,7 +784,7 @@ async function loadMessages() {
   renderList();
 }
 
-function previewOf(m) { return m.deleted ? 'Pesan dihapus' : (m.audio ? '🎙️ Pesan suara' : (m.stk ? '🏷️ Stiker' : (m.t || ''))); }
+function previewOf(m) { return m.deleted ? 'Pesan dihapus' : (m.audio ? '🎙️ Pesan suara' : (m.stk ? '🏷️ Stiker' : m.img ? '📷 Foto' : m.file ? '📎 ' + m.file.n : m.poll ? '📊 ' + m.poll.q : (m.t || ''))); }
 
 function renderMsgs() {
   const box = $('#msgs');
@@ -788,7 +800,14 @@ function renderMsgs() {
     if (fresh && m.mn && m.mn.includes(myUsername) && m.u !== myUsername) pingTag = nameOf(m.u);
     const rx = Object.entries(m.r || {}).map(([e, a]) => `<span class="${a.includes(myUsername) ? 'mine' : ''}" onclick="react(${idx},'${e}')">${e} ${a.length}</span>`).join('');
 
-    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk" onclick="stkTap(${idx})"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker" onclick="stkTap(${idx})">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
+    const pollHtml = m.poll && !m.deleted ? (() => {
+      const vs = Object.values(m.poll.v || {}), total = vs.length, mineV = (m.poll.v || {})[myUsername];
+      return `<div class="poll"><b>📊 ${esc(m.poll.q)}</b>${m.poll.opts.map((o, k) => {
+        const c = vs.filter(x => x === k).length, pct = total ? Math.round(c / total * 100) : 0;
+        return `<button class="popt ${mineV === k ? 'mine' : ''}" onclick="votePoll(${idx},${k})"><i style="width:${pct}%"></i><span>${esc(o)}</span><small>${c}</small></button>`;
+      }).join('')}<div class="muted">${total} suara · ketuk lagi buat batal</div></div>`;
+    })() : '';
+    let contentHtml = m.deleted ? `<div style="font-style:italic; opacity:0.6;">${m.t}</div>` : m.img ? `<img class="msgimg" src="${m.img}" alt="foto">` : m.file ? `<a class="fileb" href="${m.file.d}" download="${esc(m.file.n)}">📄 ${esc(m.file.n)}</a>` : m.poll ? pollHtml : m.stk ? (m.stk.k === 'vid' ? `<video src="${m.stk.d}" autoplay loop muted playsinline class="stk" onclick="stkTap(${idx})"></video>` : `<img src="${m.stk.d}" class="stk" alt="stiker" onclick="stkTap(${idx})">`) : (m.audio ? `<audio controls src="${m.audio}" style="max-width:180px;height:32px;display:block;margin-top:2px;"></audio>` : `<div>${fmt(m.t)}</div>`);
     const canDelete = mine || curMod;
     const quote = m.re && !m.deleted ? `<div class="qt" onclick="jumpTo(${m.re.i})"><b>${esc(nameOf(m.re.u))}</b><span>${esc(m.re.t)}</span></div>` : '';
 
@@ -798,7 +817,7 @@ function renderMsgs() {
       ${contentHtml}
       <div class="meta">${m.edited && !m.deleted ? '<span class="edited-tag">diedit</span>' : ''}${time(m.ts)}
         ${!m.deleted ? `<button class="rb" title="Balas" onclick="startReply(${idx})">↩</button>` : ''}
-        ${!m.deleted && mine && !m.audio && !m.stk ? `<button class="rb" title="Edit pesan" onclick="startEdit(${idx})">✏️</button>` : ''}
+        ${!m.deleted && mine && !m.audio && !m.stk && !m.img && !m.file && !m.poll ? `<button class="rb" title="Edit pesan" onclick="startEdit(${idx})">✏️</button>` : ''}
         ${!m.deleted && canDelete ? `<button class="del-btn" title="Hapus pesan" onclick="deleteMessage(${idx})">🗑️</button>` : ''}
         ${!m.deleted ? `<button class="rb" onclick="pick(event,${idx})">☺</button>` : ''}
       </div></div>
@@ -864,7 +883,7 @@ function startReply(idx) {
 
 function startEdit(idx) {
   const m = msgs.find(x => x.i === idx);
-  if (!m || m.deleted || m.audio || m.stk || m.u !== myUsername) return;
+  if (!m || m.deleted || m.audio || m.stk || m.img || m.file || m.poll || m.u !== myUsername) return;
   replyTo = null;
   editingIdx = m.i;
   showCtx('Mengedit pesan', m.t.slice(0, 80));
@@ -975,6 +994,109 @@ $('#inp').addEventListener('input', () => {
   lastTyping = n;
   api('typing', { chat: active }).catch(() => {});
 });
+
+// ---------- Lampiran (📎) ----------
+$('#attBtn').onclick = openAttach;
+
+function openAttach() {
+  if (!active) return toast('Pilih chat dulu');
+  modal(`<h3>📎 Lampiran <button class="ico" onclick="closeModal()">✕</button></h3>
+    <div class="att-grid">
+      <button onclick="pickFile('image/*', false, sendImage)"><span>🖼️</span>Galeri</button>
+      <button onclick="pickFile('image/*', true, sendImage)"><span>📷</span>Kamera</button>
+      <button onclick="pickFile('*/*', false, sendDoc)"><span>📄</span>Dokumen</button>
+      <button onclick="openStickerTray()"><span>🙂</span>Stiker</button>
+      <button onclick="pickSticker()"><span>✂️</span>Buat Stiker</button>
+      <button onclick="openPollForm()"><span>📊</span>Vote</button>
+    </div>
+    <div class="acts"><button class="btn g" onclick="closeModal()">Tutup</button></div>`);
+}
+
+function pickFile(accept, camera, cb) {
+  document.querySelectorAll('input[data-att]').forEach(x => x.remove());
+  const f = document.createElement('input');
+  f.type = 'file'; f.accept = accept; f.setAttribute('data-att', '1'); f.style.display = 'none';
+  if (camera) f.setAttribute('capture', 'environment');
+  document.body.appendChild(f);
+  f.onchange = () => { const file = f.files && f.files[0]; f.remove(); if (file) { closeModal(); cb(file); } };
+  f.click();
+}
+
+async function sendPayload(extra) {
+  if (!active) return;
+  const chat = active, rp = replyTo;
+  clearCtx(); stick = true;
+  try {
+    await api('send', { chat, text: '', reply: rp ? rp.i : undefined, ...extra });
+    ver = ''; await loadMessages(); loadChats();
+  } catch (e) { toast(e.message); }
+}
+
+async function compressImg(file) {
+  const im = new Image();
+  im.src = URL.createObjectURL(file);
+  try { await im.decode(); } catch (e) { throw new Error('Foto nggak bisa dibaca'); }
+  for (const [size, q] of [[1280, 0.8], [1024, 0.7], [800, 0.6], [640, 0.5]]) {
+    const sc = Math.min(1, size / Math.max(im.naturalWidth, im.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(im.naturalWidth * sc));
+    c.height = Math.max(1, Math.round(im.naturalHeight * sc));
+    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    const d = c.toDataURL('image/jpeg', q);
+    if (d.length <= 700000) return d;
+  }
+  throw new Error('Foto terlalu besar, pilih yang lain');
+}
+
+async function sendImage(file) {
+  toast('Lagi nyiapin foto...');
+  try { await sendPayload({ img: await compressImg(file) }); }
+  catch (e) { toast(e.message || 'Gagal kirim foto'); }
+}
+
+async function sendDoc(file) {
+  if (file.size > 380000) return toast('Dokumen maks 380KB');
+  try {
+    const d = await new Promise((ok, no) => {
+      const fr = new FileReader();
+      fr.onload = () => ok(fr.result);
+      fr.onerror = () => no(new Error('File nggak bisa dibaca'));
+      fr.readAsDataURL(file);
+    });
+    await sendPayload({ file: { n: file.name, d } });
+  } catch (e) { toast(e.message); }
+}
+
+function openPollForm() {
+  if (!active) return toast('Pilih chat dulu');
+  modal(`<h3>📊 Buat vote <button class="ico" onclick="closeModal()">✕</button></h3>
+    <label>Pertanyaan</label><input id="pQ" maxlength="120" placeholder="Mau makan apa?">
+    <label>Pilihan</label>
+    <div id="pOpts"><input class="pOpt" maxlength="60" placeholder="Pilihan 1"><input class="pOpt" maxlength="60" placeholder="Pilihan 2"></div>
+    <button class="btn g" style="width:100%;margin-top:8px" onclick="addPollOpt()">＋ Tambah pilihan</button>
+    <div class="acts"><button class="btn g" onclick="closeModal()">Batal</button><button class="btn" onclick="sendPoll()">Kirim</button></div>`);
+}
+
+function addPollOpt() {
+  const n = document.querySelectorAll('.pOpt').length;
+  if (n >= 6) return toast('Maks 6 pilihan');
+  const i = document.createElement('input');
+  i.className = 'pOpt'; i.maxLength = 60; i.placeholder = 'Pilihan ' + (n + 1);
+  $('#pOpts').appendChild(i);
+}
+
+async function sendPoll() {
+  const q = $('#pQ').value.trim();
+  const opts = [...document.querySelectorAll('.pOpt')].map(i => i.value.trim()).filter(Boolean);
+  if (!q || opts.length < 2) return toast('Isi pertanyaan dan minimal 2 pilihan');
+  closeModal();
+  await sendPayload({ poll: { q, opts } });
+}
+
+async function votePoll(idx, opt) {
+  try { await api('vote', { chat: active, idx, opt }); await loadMessages(); }
+  catch (e) { toast(e.message); }
+}
 
 // ---------- Stiker ----------
 const STK = { maxVid: 3, recent: [] };
