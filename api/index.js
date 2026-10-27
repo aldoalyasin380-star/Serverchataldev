@@ -451,13 +451,34 @@ app.post('/api/send', auth, h(async (req, res) => {
     if (!ok) return res.status(400).json({ error: 'Stiker tidak valid atau kegedean' });
     stkObj = { k: req.body.stk.k, d };
   }
-  if (!text && !audio && !stkObj) return res.status(400).json({ error: 'Pesan kosong' });
+  // lampiran: foto, dokumen, dan vote
+  const img = req.body.img ? String(req.body.img) : null;
+  if (img && !(img.length <= 700000 && /^data:image\/(jpeg|png|webp);base64,/.test(img)))
+    return res.status(400).json({ error: 'Foto tidak valid / kegedean' });
+  let fileObj = null, pollObj = null;
+  if (req.body.file && typeof req.body.file === 'object') {
+    const fd = String(req.body.file.d || '');
+    const fn = String(req.body.file.n || 'file').replace(/[\\\/<>"']/g, '').slice(0, 80) || 'file';
+    const okType = /^data:(application\/(pdf|zip|msword|octet-stream|vnd\.[^;,]+)|text\/plain|audio\/[^;,]+|video\/mp4|image\/(jpeg|png|webp|gif))[;,]/.test(fd);
+    if (fd.length > 700000 || !okType) return res.status(400).json({ error: 'Dokumen tidak didukung / kegedean (maks 380KB)' });
+    fileObj = { n: fn, d: fd };
+  }
+  if (req.body.poll && typeof req.body.poll === 'object') {
+    const q = String(req.body.poll.q || '').trim().slice(0, 120);
+    const opts = (Array.isArray(req.body.poll.opts) ? req.body.poll.opts : []).map(o => String(o || '').trim().slice(0, 60)).filter(Boolean);
+    if (!q || opts.length < 2 || opts.length > 6) return res.status(400).json({ error: 'Vote butuh pertanyaan dan 2-6 pilihan' });
+    pollObj = { q, opts, v: {} };
+  }
+  if (!text && !audio && !stkObj && !img && !fileObj && !pollObj) return res.status(400).json({ error: 'Pesan kosong' });
 
   const acc = await access(req.u, chat);
   if (!acc.ok) return res.status(403).json({ error: 'Tidak boleh kirim pesan' });
 
   const msgObj = { u: req.u, t: text, audio: audio, ts: Date.now(), r: {} };
   if (stkObj) msgObj.stk = stkObj;
+  if (img) msgObj.img = img;
+  if (fileObj) msgObj.file = fileObj;
+  if (pollObj) msgObj.poll = pollObj;
 
   // tag @username: cuma yang benar-benar ada di chat ini
   const cand = [...new Set([...text.matchAll(/(^|\s)@([a-z0-9_.]{3,20})/gi)].map(x => x[2].toLowerCase()))].filter(x => x !== req.u);
@@ -473,7 +494,7 @@ app.post('/api/send', auth, h(async (req, res) => {
     const ri = parseInt(req.body.reply, 10);
     if (ri >= 0) {
       const o = await redis.lindex('c:' + chat, ri);
-      if (o && !o.deleted) msgObj.re = { u: o.u, i: ri, t: String(o.audio ? '🎙️ Pesan suara' : o.stk ? '🏷️ Stiker' : o.t || '').slice(0, 80) };
+      if (o && !o.deleted) msgObj.re = { u: o.u, i: ri, t: String(o.audio ? '🎙️ Pesan suara' : o.stk ? '🏷️ Stiker' : o.img ? '📷 Foto' : o.file ? '📎 ' + o.file.n : o.poll ? '📊 ' + o.poll.q : o.t || '').slice(0, 80) };
     }
   }
 
@@ -517,6 +538,21 @@ app.post('/api/delete-message', auth, h(async (req, res) => {
   res.json({ ok: 1 });
 }));
 
+app.post('/api/vote', auth, h(async (req, res) => {
+  const chat = String(req.body.chat || '');
+  const idx = parseInt(req.body.idx, 10), opt = parseInt(req.body.opt, 10);
+  const acc = await access(req.u, chat);
+  if (!acc.ok) return res.status(403).json({ error: 'Tidak boleh' });
+  const m = await redis.lindex('c:' + chat, idx);
+  if (!m || m.deleted || !m.poll) return res.status(404).json({ error: 'Vote tidak ditemukan' });
+  if (!(opt >= 0 && opt < m.poll.opts.length)) return res.status(400).json({ error: 'Pilihan tidak valid' });
+  m.poll.v = m.poll.v || {};
+  if (m.poll.v[req.u] === opt) delete m.poll.v[req.u]; else m.poll.v[req.u] = opt;
+  await redis.lset('c:' + chat, idx, m);
+  await bump(chat, acc.members || []);
+  res.json({ ok: 1 });
+}));
+
 app.post('/api/edit-message', auth, h(async (req, res) => {
   const { chat } = req.body;
   const idx = parseInt(req.body.idx, 10);
@@ -526,7 +562,7 @@ app.post('/api/edit-message', auth, h(async (req, res) => {
   const m = await redis.lindex('c:' + chat, idx);
   if (!m || m.deleted) return res.status(404).json({ error: 'Pesan tidak ditemukan' });
   if (m.u !== req.u) return res.status(403).json({ error: 'Kamu hanya bisa mengedit pesan milikmu sendiri' });
-  if (m.audio || m.stk) return res.status(400).json({ error: 'Voice note dan stiker tidak bisa diedit' });
+  if (m.audio || m.stk || m.img || m.file || m.poll) return res.status(400).json({ error: 'Lampiran tidak bisa diedit' });
   m.t = text;
   m.edited = true;
   await redis.lset('c:' + chat, idx, m);
