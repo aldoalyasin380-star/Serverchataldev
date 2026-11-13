@@ -53,6 +53,18 @@ const BLOCK_MSG = 'Username sudah digunakan, gunakan username lain';
 const TTL_OPTIONS = [0, 3600, 86400, 604800, 2592000]; // mati, 1 jam, 24 jam, 7 hari, 30 hari
 const ttlKey = (u, chat) => 'setting:ttl:' + u + ':' + chat;
 const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '2', 10); // satu IP maksimal sekian akun
+const AI_USER = 'aldevai';
+const AI_DEFAULT = {
+  on: true,
+  model: 'gemini-2.5-flash',
+  prompt: 'Kamu ALDEV AI, asisten AI di aplikasi chat AL CHAT. Jawab dalam Bahasa Indonesia, jelas, dan ramah. Bantu ngoding (kasih kode yang bisa langsung dipakai, pakai blok kode), belajar (jelasin pelan-pelan dengan contoh), dan jawab soal. Kalau pertanyaannya nggak jelas, tanya balik satu hal aja.'
+};
+const xtra = r => ({ ai: !!r.ai, bd: Array.isArray(r.badges) ? r.badges : [] }); // label AI + badge tambahan
+async function ensureAi() {
+  if (!(await redis.exists('user:' + AI_USER)))
+    await redis.set('user:' + AI_USER, { username: AI_USER, name: 'ALDEV AI', bio: 'Asisten AI', av: 0, verified: false, ai: true, created: Date.now() });
+}
+async function aiCfg() { return { ...AI_DEFAULT, ...((await redis.get('ai:cfg')) || {}) }; }
 const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // kode pemulihan 8 karakter
 const SESS_CLEAR = 'ns=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure';
 
@@ -188,12 +200,15 @@ app.get('/api/me', auth, h(async (req, res) => {
   let me = await redis.get('user:' + req.u);
   if (!me) return res.status(401).json({ error: 'Akun tidak ditemukan' });
   if (!me.rc) { me.rc = newRc(); await redis.set('user:' + req.u, me); }
+  await ensureAi();
+  await redis.sadd('uchats:' + req.u, ['dm', ...[AI_USER, req.u].sort()].join(':'));
+  const aiOn = (await aiCfg()).on;
   if (req.u === 'aldev' && !me.verified) { me.verified = true; await redis.set('user:' + req.u, me); }
   
   await redis.set('online:' + req.u, Date.now(), { ex: 30 });
   await redis.sadd('days:' + req.u, today());
 
-  res.json({ ...me, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
+  res.json({ ...me, aiOn, missions: await missions(req.u, me), devBadgeColor: req.u === 'aldev' ? getDevBadgeColor() : null });
 }));
 
 app.post('/api/me', auth, h(async (req, res) => {
@@ -247,6 +262,7 @@ app.post('/api/profiles', auth, h(async (req, res) => {
           name: r.name, 
           v: !!r.verified || u === 'aldev', 
           badgeColor: u === 'aldev' ? devBadge : 'blue',
+          ...xtra(r),
           a: r.av || 0, 
           bio: r.bio,
           online: !!onlineKeys[i]
@@ -289,6 +305,7 @@ app.get('/api/group-members', auth, h(async (req, res) => {
       name: r.name || u,
       v: !!r.verified || u === 'aldev',
       badgeColor: u === 'aldev' ? devBadge : 'blue',
+      ...xtra(r),
       a: r.av || 0,
       online: isOnline,
       role: isOwner ? 'owner' : isAdmin ? 'admin' : 'member'
@@ -310,6 +327,7 @@ app.get('/api/users', auth, h(async (req, res) => {
       name: r.name, 
       v: !!r.verified || r.username === 'aldev', 
       badgeColor: r.username === 'aldev' ? devBadge : 'blue',
+      ...xtra(r),
       a: r.av || 0
     }));
   res.json(found.filter(x => x.username !== req.u).slice(0, 20));
@@ -506,7 +524,79 @@ app.post('/api/send', auth, h(async (req, res) => {
     redis.sadd('allchats', chat),
     ...(chat.startsWith('dm:') ? acc.members.map(m => redis.sadd('uchats:' + m, chat)) : []),
   ]);
+  if (chat.startsWith('dm:') && chat.split(':').includes(AI_USER) && req.u !== AI_USER) await aiReply(chat, req.u);
   res.json({ ok: 1 });
+}));
+
+// ---------- ALDEV AI (Gemini) ----------
+async function aiReply(chat, u) {
+  await ensureAi();
+  const cfg = await aiCfg();
+  let text;
+  if (!cfg.on) {
+    text = '🤖 AI lagi nonaktif. Coba lagi nanti ya.';
+  } else if (!process.env.GEMINI_API_KEY) {
+    text = '⚠️ AI belum dikonfigurasi (GEMINI_API_KEY belum diisi di Vercel).';
+  } else {
+    try {
+      const hist = await redis.lrange('c:' + chat, -20, -1);
+      const contents = hist.filter(m => m && !m.deleted && (m.t || '').trim())
+        .map(m => ({ role: m.u === AI_USER ? 'model' : 'user', parts: [{ text: String(m.t).slice(0, 2000) }] }));
+      while (contents.length && contents[0].role === 'model') contents.shift();
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: cfg.prompt }] }, contents }),
+        signal: AbortSignal.timeout(25000)
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+      text = (((j.candidates || [])[0] || {}).content || {}).parts || [];
+      text = text.map(p => p.text || '').join('').trim();
+      if (!text) throw new Error('jawaban kosong');
+    } catch (e) {
+      text = '⚠️ AI lagi error: ' + String(e.message || e).slice(0, 160);
+    }
+  }
+  await redis.rpush('c:' + chat, { u: AI_USER, t: text.slice(0, 2000), ts: Date.now(), r: {} });
+  await bump(chat, [u, AI_USER]);
+}
+
+// ---------- Panel admin (cuma aldev) ----------
+app.get('/api/admin/ai', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  res.json({ cfg: await aiCfg(), hasKey: !!process.env.GEMINI_API_KEY });
+}));
+
+app.post('/api/admin/ai', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const cur = await aiCfg(), b = req.body || {};
+  if (typeof b.on === 'boolean') cur.on = b.on;
+  if (typeof b.model === 'string' && b.model.trim()) cur.model = b.model.trim().slice(0, 60);
+  if (typeof b.prompt === 'string' && b.prompt.trim()) cur.prompt = b.prompt.trim().slice(0, 2000);
+  await redis.set('ai:cfg', cur);
+  res.json({ ok: 1, cfg: cur });
+}));
+
+app.post('/api/admin/badge', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const u = clean(req.body.user);
+  const me = await redis.get('user:' + u);
+  if (!me) return res.status(404).json({ error: 'User tidak ditemukan' });
+  me.badges = Array.isArray(me.badges) ? me.badges : [];
+  if (req.body.action === 'add') {
+    const t = String(req.body.t || '').trim().slice(0, 12);
+    if (!t) return res.status(400).json({ error: 'Teks badge kosong' });
+    if (me.badges.length >= 5) return res.status(400).json({ error: 'Maks 5 badge per user' });
+    const c = /^#[0-9a-f]{6}$/i.test(req.body.c || '') ? req.body.c : '#2f81f7';
+    me.badges.push({ t, c });
+  } else if (req.body.action === 'remove') {
+    const i = parseInt(req.body.i, 10);
+    if (!(i >= 0 && i < me.badges.length)) return res.status(400).json({ error: 'Badge tidak ditemukan' });
+    me.badges.splice(i, 1);
+  } else return res.status(400).json({ error: 'Aksi tidak valid' });
+  await redis.set('user:' + u, me);
+  res.json({ ok: 1, badges: me.badges });
 }));
 
 // Moderator: owner & admin grup (atau owner/admin Global). DM nggak punya moderator.
