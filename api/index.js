@@ -56,7 +56,7 @@ const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '2', 10); // satu 
 const AI_USER = 'aldevai';
 const AI_DEFAULT = {
   on: true,
-  model: 'gemini-2.5-flash',
+  model: 'gemini-3.8-flash',
   prompt: 'Kamu ALDEV AI, asisten AI di aplikasi chat AL CHAT. Jawab dalam Bahasa Indonesia, jelas, dan ramah. Bantu ngoding (kasih kode yang bisa langsung dipakai, pakai blok kode), belajar (jelasin pelan-pelan dengan contoh), dan jawab soal. Kalau pertanyaannya nggak jelas, tanya balik satu hal aja.'
 };
 const xtra = r => ({ ai: !!r.ai, bd: Array.isArray(r.badges) ? r.badges : [] }); // label AI + badge tambahan
@@ -88,6 +88,7 @@ async function sessUser(req) {
 async function issueSession(u, res) {
   const tok = crypto.randomBytes(24).toString('hex');
   await redis.set('sess:' + tok, u, { ex: SESS_TTL });
+  await redis.sadd('sessu:' + u, tok);
   res.set('x-session', tok);
   res.set('Set-Cookie', `ns=${tok}; Path=/; Max-Age=${SESS_TTL}; HttpOnly; SameSite=Lax; Secure`);
   return tok;
@@ -543,14 +544,31 @@ async function aiReply(chat, u) {
       const contents = hist.filter(m => m && !m.deleted && (m.t || '').trim())
         .map(m => ({ role: m.u === AI_USER ? 'model' : 'user', parts: [{ text: String(m.t).slice(0, 2000) }] }));
       while (contents.length && contents[0].role === 'model') contents.shift();
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: cfg.prompt }] }, contents }),
-        signal: AbortSignal.timeout(25000)
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+      let model = cfg.model, retries = 0, j = null;
+      for (let step = 0; step < 5; step++) {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: cfg.prompt }] }, contents }),
+          signal: AbortSignal.timeout(12000)
+        });
+        j = await r.json();
+        if (r.ok) break;
+        const msg = (j.error && j.error.message) || ('HTTP ' + r.status);
+        const sug = [...msg.matchAll(/models\/(gemini-[\w.\-]+)/g)].map(m => m[1]).find(n => n !== model);
+        if (/no longer available/i.test(msg) && sug) {
+          // model lama udah dihentikan: pindah ke yang disarankan Google, simpan permanen
+          model = sug;
+          const c2 = await aiCfg(); c2.model = model; await redis.set('ai:cfg', c2);
+          continue;
+        }
+        if ((r.status === 429 || r.status === 503 || /high demand/i.test(msg)) && retries < 2) {
+          retries++;
+          await new Promise(res => setTimeout(res, 1500 * retries));
+          continue;
+        }
+        throw new Error(msg);
+      }
       text = (((j.candidates || [])[0] || {}).content || {}).parts || [];
       text = text.map(p => p.text || '').join('').trim();
       if (!text) throw new Error('jawaban kosong');
@@ -576,6 +594,42 @@ app.post('/api/admin/ai', auth, h(async (req, res) => {
   if (typeof b.prompt === 'string' && b.prompt.trim()) cur.prompt = b.prompt.trim().slice(0, 2000);
   await redis.set('ai:cfg', cur);
   res.json({ ok: 1, cfg: cur });
+}));
+
+app.get('/api/admin/users', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const q = String(req.query.q || '').toLowerCase().replace(/^@/, '').trim();
+  const names = (await redis.smembers('users')).filter(x => x !== AI_USER).slice(0, 2000);
+  const rows = names.length ? await redis.mget(...names.map(u => 'user:' + u)) : [];
+  const onl = names.length ? await redis.mget(...names.map(u => 'online:' + u)) : [];
+  const all = names.map((u, i) => ({
+    username: u, name: rows[i] ? rows[i].name : u, rc: rows[i] ? rows[i].rc || '' : '',
+    created: rows[i] ? rows[i].created || 0 : 0, verified: !!(rows[i] && rows[i].verified), online: !!onl[i]
+  }));
+  const list = all
+    .filter(x => !q || x.username.includes(q) || x.name.toLowerCase().includes(q))
+    .sort((a, b) => Number(b.online) - Number(a.online) || b.created - a.created)
+    .slice(0, 100);
+  res.json({ total: all.length, online: all.filter(x => x.online).length, users: list });
+}));
+
+app.post('/api/admin/rc-reset', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const u = clean(req.body.user);
+  const me = await redis.get('user:' + u);
+  if (!me) return res.status(404).json({ error: 'User tidak ditemukan' });
+  me.rc = newRc();
+  await redis.set('user:' + u, me);
+  res.json({ user: u, rc: me.rc });
+}));
+
+app.post('/api/admin/revoke', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const u = clean(req.body.user);
+  const toks = await redis.smembers('sessu:' + u);
+  if (toks.length) await redis.del(...toks.map(t => 'sess:' + t));
+  await redis.del('sessu:' + u);
+  res.json({ ok: 1, revoked: toks.length });
 }));
 
 app.post('/api/admin/badge', auth, h(async (req, res) => {
