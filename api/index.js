@@ -60,9 +60,11 @@ const AI_DEFAULT = {
   prompt: 'Kamu ALDEV AI, asisten AI di aplikasi chat AL CHAT. Jawab dalam Bahasa Indonesia, jelas, dan ramah. Bantu ngoding (kasih kode yang bisa langsung dipakai, pakai blok kode), belajar (jelasin pelan-pelan dengan contoh), dan jawab soal. Kalau pertanyaannya nggak jelas, tanya balik satu hal aja.'
 };
 const xtra = r => ({ ai: !!r.ai, bd: Array.isArray(r.badges) ? r.badges : [] }); // label AI + badge tambahan
+const AI_AVATAR = 'https://files.catbox.moe/y4v1hf.png';
 async function ensureAi() {
-  if (!(await redis.exists('user:' + AI_USER)))
-    await redis.set('user:' + AI_USER, { username: AI_USER, name: 'ALDEV AI', bio: 'Asisten AI', av: 0, verified: false, ai: true, created: Date.now() });
+  const rec = await redis.get('user:' + AI_USER);
+  const want = { username: AI_USER, name: 'ALDEV AI', bio: 'Asisten AI · tanya apa aja', av: AI_AVATAR, verified: false, ai: true, created: (rec && rec.created) || Date.now() };
+  if (!rec || rec.av !== AI_AVATAR || rec.name !== want.name || rec.bio !== want.bio) await redis.set('user:' + AI_USER, want);
 }
 async function aiCfg() { return { ...AI_DEFAULT, ...((await redis.get('ai:cfg')) || {}) }; }
 const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // kode pemulihan 8 karakter
@@ -262,7 +264,7 @@ app.post('/api/profiles', auth, h(async (req, res) => {
         out[u] = { 
           name: r.name, 
           v: !!r.verified || u === 'aldev', 
-          badgeColor: u === 'aldev' ? devBadge : 'blue',
+          badgeColor: u === 'aldev' ? devBadge : (r.checkColor || 'blue'),
           ...xtra(r),
           a: r.av || 0, 
           bio: r.bio,
@@ -305,7 +307,7 @@ app.get('/api/group-members', auth, h(async (req, res) => {
       username: u,
       name: r.name || u,
       v: !!r.verified || u === 'aldev',
-      badgeColor: u === 'aldev' ? devBadge : 'blue',
+      badgeColor: u === 'aldev' ? devBadge : (r.checkColor || 'blue'),
       ...xtra(r),
       a: r.av || 0,
       online: isOnline,
@@ -327,7 +329,7 @@ app.get('/api/users', auth, h(async (req, res) => {
       username: r.username, 
       name: r.name, 
       v: !!r.verified || r.username === 'aldev', 
-      badgeColor: r.username === 'aldev' ? devBadge : 'blue',
+      badgeColor: r.username === 'aldev' ? devBadge : (r.checkColor || 'blue'),
       ...xtra(r),
       a: r.av || 0
     }));
@@ -540,7 +542,7 @@ async function aiReply(chat, u) {
     text = '⚠️ AI belum dikonfigurasi (GEMINI_API_KEY belum diisi di Vercel).';
   } else {
     try {
-      const hist = await redis.lrange('c:' + chat, -20, -1);
+      const hist = await redis.lrange('c:' + chat, -12, -1);
       const contents = hist.filter(m => m && !m.deleted && (m.t || '').trim())
         .map(m => ({ role: m.u === AI_USER ? 'model' : 'user', parts: [{ text: String(m.t).slice(0, 2000) }] }));
       while (contents.length && contents[0].role === 'model') contents.shift();
@@ -550,7 +552,7 @@ async function aiReply(chat, u) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
           body: JSON.stringify({ systemInstruction: { parts: [{ text: cfg.prompt }] }, contents }),
-          signal: AbortSignal.timeout(12000)
+          signal: AbortSignal.timeout(40000)
         });
         j = await r.json();
         if (r.ok) break;
@@ -604,13 +606,42 @@ app.get('/api/admin/users', auth, h(async (req, res) => {
   const onl = names.length ? await redis.mget(...names.map(u => 'online:' + u)) : [];
   const all = names.map((u, i) => ({
     username: u, name: rows[i] ? rows[i].name : u, rc: rows[i] ? rows[i].rc || '' : '',
-    created: rows[i] ? rows[i].created || 0 : 0, verified: !!(rows[i] && rows[i].verified), online: !!onl[i]
+    created: rows[i] ? rows[i].created || 0 : 0, verified: !!(rows[i] && rows[i].verified), color: rows[i] ? rows[i].checkColor || 'blue' : 'blue', online: !!onl[i]
   }));
   const list = all
     .filter(x => !q || x.username.includes(q) || x.name.toLowerCase().includes(q))
     .sort((a, b) => Number(b.online) - Number(a.online) || b.created - a.created)
     .slice(0, 100);
   res.json({ total: all.length, online: all.filter(x => x.online).length, users: list });
+}));
+
+app.post('/api/admin/verify', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const u = clean(req.body.user);
+  const me = await redis.get('user:' + u);
+  if (!me) return res.status(404).json({ error: 'User tidak ditemukan' });
+  if (typeof req.body.on === 'boolean') me.verified = req.body.on;
+  if (['blue', 'orange', 'red', 'yellow', 'rainbow'].includes(req.body.color)) me.checkColor = req.body.color;
+  await redis.set('user:' + u, me);
+  res.json({ ok: 1, verified: !!me.verified, color: me.checkColor || 'blue' });
+}));
+
+// semua grup (buat panel admin)
+app.get('/api/admin/groups', auth, h(async (req, res) => {
+  if (req.u !== 'aldev') return res.status(403).json({ error: 'Cuma owner' });
+  const ids = new Set(await redis.smembers('allgroups'));
+  const users = await redis.smembers('users');
+  for (let i = 0; i < users.length; i += 50) {
+    const sets = await Promise.all(users.slice(i, i + 50).map(u => redis.smembers('uchats:' + u)));
+    sets.forEach(st => st.forEach(c => { if (c.startsWith('grp:')) ids.add(c.slice(4)); }));
+  }
+  const list = [...ids];
+  if (!list.length) return res.json({ groups: [] });
+  const rows = await redis.mget(...list.map(i => 'group:' + i));
+  const groups = rows.filter(Boolean)
+    .map(g => ({ id: g.id, name: g.name, owner: g.owner, members: g.members || [], count: (g.members || []).length }))
+    .sort((a, b) => b.count - a.count);
+  res.json({ groups });
 }));
 
 app.post('/api/admin/rc-reset', auth, h(async (req, res) => {
@@ -780,6 +811,7 @@ app.post('/api/groups', auth, h(async (req, res) => {
   const id = crypto.randomBytes(4).toString('hex');
   const groupObj = { id, name, avatar: null, owner: req.u, admins: [req.u], members: [req.u] };
   await redis.set('group:' + id, groupObj);
+  await redis.sadd('allgroups', id);
   await redis.sadd('uchats:' + req.u, 'grp:' + id);
   res.json({ id: 'grp:' + id });
 }));
