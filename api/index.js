@@ -547,20 +547,39 @@ app.post('/api/send', auth, h(async (req, res) => {
 }));
 
 // ---------- ALDEV AI (Gemini) ----------
+// Provider OpenAI-compatible (Groq / OpenRouter / dll). Aktif kalau env AI_BASE_URL & AI_API_KEY diisi.
+async function callOpenAICompat(cfg, contents) {
+  const msgs = [{ role: 'system', content: cfg.prompt }, ...contents.map(c => ({ role: c.role === 'model' ? 'assistant' : 'user', content: c.parts[0].text }))];
+  const r = await fetch(process.env.AI_BASE_URL.replace(/\/$/, '') + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.AI_API_KEY },
+    body: JSON.stringify({ model: cfg.model, messages: msgs }),
+    signal: AbortSignal.timeout(25000)
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
+  const t = (((j.choices || [])[0] || {}).message || {}).content || '';
+  if (!t.trim()) throw new Error('jawaban kosong');
+  return t.trim();
+}
+
 async function aiReply(chat, u) {
   await ensureAi();
   const cfg = await aiCfg();
   let text;
   if (!cfg.on) {
     text = '🤖 AI lagi nonaktif. Coba lagi nanti ya.';
-  } else if (!process.env.GEMINI_API_KEY) {
-    text = '⚠️ AI belum dikonfigurasi (GEMINI_API_KEY belum diisi di Vercel).';
+  } else if (!process.env.GEMINI_API_KEY && !(process.env.AI_BASE_URL && process.env.AI_API_KEY)) {
+    text = '⚠️ AI belum dikonfigurasi. Isi GEMINI_API_KEY, atau AI_BASE_URL + AI_API_KEY di Vercel.';
   } else {
     try {
       const hist = await redis.lrange('c:' + chat, -12, -1);
       let contents = hist.filter(m => m && !m.deleted && (m.t || '').trim())
         .map(m => ({ role: m.u === AI_USER ? 'model' : 'user', parts: [{ text: String(m.t).slice(0, 2000) }] }));
       while (contents.length && contents[0].role === 'model') contents.shift();
+      if (process.env.AI_BASE_URL && process.env.AI_API_KEY) {
+        text = await callOpenAICompat(cfg, contents);
+      } else {
       let model = cfg.model, retries = 0, j = null, timeouts = 0;
       for (let step = 0; step < 5; step++) {
         let r;
@@ -594,6 +613,7 @@ async function aiReply(chat, u) {
       text = (((j.candidates || [])[0] || {}).content || {}).parts || [];
       text = text.map(p => p.text || '').join('').trim();
       if (!text) throw new Error('jawaban kosong');
+      }
     } catch (e) {
       text = '⚠️ AI lagi error: ' + String(e.message || e).slice(0, 160);
     }
