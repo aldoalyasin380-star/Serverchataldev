@@ -56,15 +56,30 @@ const MAX_ACC_PER_IP = parseInt(process.env.MAX_ACC_PER_IP || '2', 10); // satu 
 const AI_USER = 'aldevai';
 const AI_DEFAULT = {
   on: true,
+  name: 'ALDEV AI',
+  avatarUrl: 'https://files.catbox.moe/y4v1hf.png',
   model: 'gemini-3.8-flash',
   prompt: 'Kamu ALDEV AI, asisten AI di aplikasi chat AL CHAT. Jawab dalam Bahasa Indonesia, jelas, dan ramah. Bantu ngoding (kasih kode yang bisa langsung dipakai, pakai blok kode), belajar (jelasin pelan-pelan dengan contoh), dan jawab soal. Kalau pertanyaannya nggak jelas, tanya balik satu hal aja.'
 };
 const xtra = r => ({ ai: !!r.ai, bd: Array.isArray(r.badges) ? r.badges : [] }); // label AI + badge tambahan
-const AI_AVATAR = 'https://files.catbox.moe/y4v1hf.png';
 async function ensureAi() {
-  const rec = await redis.get('user:' + AI_USER);
-  const want = { username: AI_USER, name: 'ALDEV AI', bio: 'Asisten AI · tanya apa aja', av: AI_AVATAR, verified: false, ai: true, created: (rec && rec.created) || Date.now() };
-  if (!rec || rec.av !== AI_AVATAR || rec.name !== want.name || rec.bio !== want.bio) await redis.set('user:' + AI_USER, want);
+  const cfg = await aiCfg();
+  const rec = (await redis.get('user:' + AI_USER)) || {};
+  const want = { username: AI_USER, name: cfg.name, bio: 'Online - Siap bantu belajar', ai: true, verified: false,
+    created: rec.created || Date.now(), av: rec.av || 0, avUrl: rec.avUrl || '' };
+  if (cfg.avatarUrl && cfg.avatarUrl !== rec.avUrl) {
+    try {
+      const r = await fetch(cfg.avatarUrl, { signal: AbortSignal.timeout(8000) });
+      const ct = (r.headers.get('content-type') || '').split(';')[0];
+      if (!r.ok || !/^image\//.test(ct)) throw new Error('bukan gambar');
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > 400000) throw new Error('gambar kegedean');
+      await redis.set('av:' + AI_USER, `data:${ct};base64,${buf.toString('base64')}`);
+      want.av = Date.now(); want.avUrl = cfg.avatarUrl;
+    } catch (e) { console.error('foto AI gagal diambil:', e.message); }
+  }
+  if (!rec.username || rec.name !== want.name || rec.bio !== want.bio || rec.av !== want.av || rec.avUrl !== want.avUrl)
+    await redis.set('user:' + AI_USER, want);
 }
 async function aiCfg() { return { ...AI_DEFAULT, ...((await redis.get('ai:cfg')) || {}) }; }
 const newRc = () => crypto.randomBytes(4).toString('hex').toUpperCase(); // kode pemulihan 8 karakter
@@ -543,17 +558,22 @@ async function aiReply(chat, u) {
   } else {
     try {
       const hist = await redis.lrange('c:' + chat, -12, -1);
-      const contents = hist.filter(m => m && !m.deleted && (m.t || '').trim())
+      let contents = hist.filter(m => m && !m.deleted && (m.t || '').trim())
         .map(m => ({ role: m.u === AI_USER ? 'model' : 'user', parts: [{ text: String(m.t).slice(0, 2000) }] }));
       while (contents.length && contents[0].role === 'model') contents.shift();
-      let model = cfg.model, retries = 0, j = null;
+      let model = cfg.model, retries = 0, j = null, timeouts = 0;
       for (let step = 0; step < 5; step++) {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        let r;
+        try { r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
           body: JSON.stringify({ systemInstruction: { parts: [{ text: cfg.prompt }] }, contents }),
-          signal: AbortSignal.timeout(40000)
-        });
+          signal: AbortSignal.timeout(25000)
+        }); }
+        catch (err) {
+          if (/timeout|abort/i.test(err.name + ' ' + err.message) && timeouts < 1) { timeouts++; contents = contents.slice(-4); continue; }
+          throw err;
+        }
         j = await r.json();
         if (r.ok) break;
         const msg = (j.error && j.error.message) || ('HTTP ' + r.status);
@@ -594,7 +614,10 @@ app.post('/api/admin/ai', auth, h(async (req, res) => {
   if (typeof b.on === 'boolean') cur.on = b.on;
   if (typeof b.model === 'string' && b.model.trim()) cur.model = b.model.trim().slice(0, 60);
   if (typeof b.prompt === 'string' && b.prompt.trim()) cur.prompt = b.prompt.trim().slice(0, 2000);
+  if (typeof b.name === 'string' && b.name.trim()) cur.name = b.name.trim().slice(0, 24);
+  if (typeof b.avatarUrl === 'string' && /^https?:\/\//.test(b.avatarUrl.trim())) cur.avatarUrl = b.avatarUrl.trim().slice(0, 300);
   await redis.set('ai:cfg', cur);
+  await ensureAi();
   res.json({ ok: 1, cfg: cur });
 }));
 
